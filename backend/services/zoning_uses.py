@@ -425,9 +425,35 @@ BY_RIGHT_USES = {
         "Recycling / Processing Facility",
         "Warehouse / Distribution Center",
     ],
+    # ── Neighborhood Commercial Restricted (ER) ──────────────────────────
+    # Same family as E but with a shorter permitted use list — no fast food
+    # drive-throughs, no auto parts, fewer high-intensity retail uses.
+    "ER": [
+        "Sit-Down Restaurant",
+        "General Retail Store",
+        "Pharmacy / Drug Store",
+        "Personal Service (Salon, Nail, Laundry)",
+        "Medical / Dental Office",
+        "Professional Office (Law, Finance, Insurance)",
+        "Bank / Financial Institution",
+        "Gym / Fitness Center",
+        "Daycare / Child Care Center",
+    ],
+    "CR": [  # alias seen in some PD codes (Commercial Restricted)
+        "Sit-Down Restaurant",
+        "General Retail Store",
+        "Medical / Dental Office",
+        "Professional Office (Law, Finance, Insurance)",
+        "Personal Service (Salon, Nail, Laundry)",
+    ],
+    "NS":  ["General Retail Store", "Personal Service (Salon, Nail, Laundry)", "Medical / Dental Office"],
+
+    # ── Residential zones ────────────────────────────────────────────────
     "A-5": ["Single-Family Residence"],
     "A-43":["Single-Family Residence"],
     "A":   ["Single-Family Residence"],
+    "AR":  ["Single-Family Residence"],   # Agricultural Residential
+    "GR":  ["Single-Family Residence", "Duplex (Two-Family)"],  # General Residential
     "B":   ["Duplex (Two-Family)", "Single-Family Residence"],
     "C":   ["Garden Apartment Complex", "Urban Row House / Townhome"],
     "D":   ["Garden Apartment Complex"],
@@ -436,8 +462,14 @@ BY_RIGHT_USES = {
     "R1":  ["Urban Row House / Townhome", "Single-Family Residence"],
     "MU-1":["Urban Row House / Townhome", "Professional Office (Law, Finance, Insurance)", "General Retail Store"],
     "MU-2":["Garden Apartment Complex", "Professional Office (Law, Finance, Insurance)", "Sit-Down Restaurant"],
-    "NS":  ["General Retail Store", "Personal Service (Salon, Nail, Laundry)", "Medical / Dental Office"],
+
+    # ── Civic / Institutional ────────────────────────────────────────────
     "CF":  ["Government / Public Facility", "Religious Institution / Church"],
+
+    # ── Agricultural / Open space ────────────────────────────────────────
+    # AG has no meaningful by-right commercial or residential density —
+    # the fiscal impact scenarios don't apply in the normal sense.
+    "AG":  [],
 }
 
 # ---------------------------------------------------------------------------
@@ -674,12 +706,21 @@ def get_by_right_scenarios(
     Return computed fiscal impacts for every by-right use in the target zone,
     sorted best-to-worst annual net.
     """
-    # Normalize code: strip overlay suffixes (e.g. /HSE, /HC, /SSO, /DD)
-    base = to_code.split("/")[0].upper()
+    code_up = to_code.strip().upper()
+    parts   = code_up.split("/")
 
-    # Try exact, then strip trailing digits/dashes
+    # For PD/ZONE codes (e.g. PD/E, PD/CR, PD/CF, PD/I), use the zone
+    # after the slash as the lookup key — that's what the development is
+    # actually being held to (e.g. PD/E means PD held to E standards).
+    if len(parts) == 2 and parts[0] in ("PD", "SPD"):
+        base = parts[1]
+    else:
+        # For overlay codes (e.g. A-5/HC, H/DD), use the primary zone
+        base = parts[0]
+
+    # Try exact match first, then progressively simpler forms
     use_names = (
-        BY_RIGHT_USES.get(to_code.upper()) or
+        BY_RIGHT_USES.get(code_up) or
         BY_RIGHT_USES.get(base) or
         BY_RIGHT_USES.get(re.sub(r"[-\d]+$", "", base))
     )

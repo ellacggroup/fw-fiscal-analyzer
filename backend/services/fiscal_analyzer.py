@@ -706,6 +706,30 @@ def _enrich_zoning_analysis(result: dict, title: str, description: str, acreage:
     scenarios = get_by_right_scenarios(zr["to_code"], assumed_acres)
     result["by_right_scenarios"] = scenarios
 
+    # ── Fix fiscal_impact_rating to reflect direction of change ───────────
+    # The base analysis rates the TO zone in isolation (e.g. any commercial =
+    # POSITIVE). But a rezoning FROM a higher-value zone TO a lower-value zone
+    # WORSENS the city's fiscal position even if the destination is still OK.
+    # Override the rating based on the incremental from→to RC comparison.
+    from_rc = LAND_USE_PROTOTYPES.get(zr["from_proto"] or "", {}).get("rc_ratio")
+    to_rc   = LAND_USE_PROTOTYPES.get(zr["to_proto"]   or "", {}).get("rc_ratio")
+
+    if from_rc is not None and to_rc is not None:
+        if to_rc > from_rc + 0.05:
+            result["fiscal_impact_rating"] = "POSITIVE"
+        elif to_rc < from_rc - 0.05:
+            result["fiscal_impact_rating"] = "NEGATIVE"
+        else:
+            result["fiscal_impact_rating"] = "NEUTRAL"
+    elif impact.get("annual_net_change") is not None:
+        net = impact["annual_net_change"]
+        if net > 500:
+            result["fiscal_impact_rating"] = "POSITIVE"
+        elif net < -500:
+            result["fiscal_impact_rating"] = "NEGATIVE"
+        else:
+            result["fiscal_impact_rating"] = "NEUTRAL"
+
     return result
 
 
