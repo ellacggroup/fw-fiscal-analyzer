@@ -329,20 +329,37 @@ def _project_40yr(
 # Fort Worth zoning analysis helpers
 # ---------------------------------------------------------------------------
 
-# Regex to pull "From: "CODE" description To: "CODE" description" out of the text
+# Regex to pull "From: "CODE" description To: "CODE" description" out of the text.
+#
+# Handles these Fort Worth patterns:
+#   Standard:     From: "A-43" One-Family   To: "E" Neighborhood Commercial
+#   PD amendment: From: "PD894" desc        To: Amend "PD894" new desc
+#   Same zone+CUP:From: "K" Heavy Ind.      To: "K" Heavy Ind. with CUP
+#
+# The (?:Amend\s+)? group makes the word "Amend" optional after "To:" so
+# PD amendment items parse correctly even though the zone code isn't first.
 _ZC_FROM_TO = re.compile(
-    r'From:\s*"([^"]+)"\s*(.*?)\s+To:\s*"([^"]+)"\s*(.*?)(?=\s*(?:Recommended|Speaker|$))',
+    r'From:\s*"([^"]+)"\s*(.*?)'
+    r'\s+To:\s*(?:Amend\s+)?'
+    r'"([^"]+)"\s*(.*?)'
+    r'(?=\s*(?:\(Recommended|Recommended|Speaker|$))',
     re.IGNORECASE | re.DOTALL,
 )
 
-# Map Fort Worth zone codes to plain-English land-use labels
+# Map Fort Worth zone codes to plain-English land-use labels.
+# Covers all zone codes seen across FW agendas as of 2026.
 _FW_ZONE_MAP = {
-    # Single-family
+    # Single-family residential
     "A":    "Single-Family Residential",
     "A-5":  "Single-Family Residential",
     "A-43": "Single-Family Residential",
     "R1":   "Zero-Lot-Line / Cluster Residential",
     "UR":   "Urban Residential (Medium Density)",
+    "GR":   "General Residential",
+    # Agricultural / rural
+    "AG":   "Agricultural",
+    "AN":   "Agricultural / Natural",
+    "AR":   "Agricultural Residential",
     # Two-family / small multi
     "B":    "Two-Family Residential",
     # Multifamily
@@ -352,6 +369,7 @@ _FW_ZONE_MAP = {
     "D-HR1":"High-Rise Multifamily Residential",
     # Commercial
     "E":    "Neighborhood Commercial",
+    "ER":   "Neighborhood Commercial Restricted",
     "F":    "General Commercial",
     "G":    "Intensive Commercial",
     "H":    "Central Business District",
@@ -364,50 +382,94 @@ _FW_ZONE_MAP = {
     "CF":   "Community Facilities / Institutional",
     "O-1":  "Floodplain / Open Space",
     "PD":   "Planned Development",
-    "PI-UL-2": "Panther Island Urban District",
-    "MU-1": "Mixed-Use",
-    "MU-2": "Mixed-Use (Higher Intensity)",
-    "MU":   "Mixed-Use",
+    # Special districts
+    "PI-UL-2":   "Panther Island Urban District",
+    "MU-1":      "Mixed-Use",
+    "MU-2":      "Mixed-Use (Higher Intensity)",
+    "MU":        "Mixed-Use",
+    "TL-N":      "Trinity Lakes Neighborhood District",
+    "SY-TSA":    "Stockyards Transition District",
+    "SY-HCO":    "Stockyards Historic Core District",
+    "UNZONED":   "Unzoned / ETJ",
 }
 
 # Which land-use prototype to use when the FW code is known
 _FW_ZONE_TO_PROTOTYPE = {
+    # Residential
     "Single-Family Residential":             "Single-Family Residential",
     "Zero-Lot-Line / Cluster Residential":   "Single-Family Residential",
     "Urban Residential (Medium Density)":    "Multifamily Residential",
+    "General Residential":                   "Single-Family Residential",
+    "Agricultural Residential":              "Single-Family Residential",
+    "Trinity Lakes Neighborhood District":   "Single-Family Residential",
     "Two-Family Residential":                "Multifamily Residential",
     "Low-Rise Multifamily Residential":      "Multifamily Residential",
     "High-Density Multifamily Residential":  "Multifamily Residential",
     "High-Rise Multifamily Residential":     "Multifamily Residential",
+    # Commercial
     "Neighborhood Commercial":               "Commercial Retail",
+    "Neighborhood Commercial Restricted":    "Commercial Retail",
     "Neighborhood Service Commercial":       "Commercial Retail",
     "General Commercial":                    "Commercial Retail",
     "Intensive Commercial":                  "Commercial Retail",
     "Central Business District":             "Commercial Retail",
+    "Stockyards Transition District":        "Mixed-Use",
+    "Stockyards Historic Core District":     "Mixed-Use",
+    # Industrial
     "Light Industrial":                      "Industrial / Warehouse",
     "Medium Industrial":                     "Industrial / Warehouse",
     "Heavy Industrial":                      "Industrial / Warehouse",
+    # Civic / open space
     "Community Facilities / Institutional":  "Public / Institutional",
     "Floodplain / Open Space":               "Open Space / Park",
+    "Agricultural":                          "Open Space / Park",
+    "Agricultural / Natural":                "Open Space / Park",
+    "Unzoned / ETJ":                         "Open Space / Park",
+    # Mixed / special
     "Mixed-Use":                             "Mixed-Use",
     "Mixed-Use (Higher Intensity)":          "Mixed-Use",
-    "Planned Development":                   None,   # need description
     "Panther Island Urban District":         "Mixed-Use",
+    "Planned Development":                   None,   # inferred from description
 }
 
 
 def _fw_zone_label(code: str, description: str) -> str:
-    """Turn a Fort Worth zone code into a readable label, falling back to the description."""
+    """Turn a Fort Worth zone code into a readable label."""
     code_clean = code.strip().upper()
-    # Try exact match first, then strip after first slash (e.g. "A-5/HC" → "A-5")
+
+    # 1. Exact match
     label = _FW_ZONE_MAP.get(code_clean)
-    if not label:
-        base = code_clean.split("/")[0]
-        label = _FW_ZONE_MAP.get(base)
-    if not label:
-        # Use first sentence of description if provided
-        label = description.strip().split(".")[0].split("(")[0].strip()[:80] or code_clean
-    return label
+    if label:
+        return label
+
+    # 2. Strip overlay suffix (A-5/HC → A-5, H/DD → H, UR/SSO → UR)
+    base = code_clean.split("/")[0]
+    label = _FW_ZONE_MAP.get(base)
+    if label:
+        return label
+
+    # 3. Pattern-based families for codes with numeric suffixes
+    #    (SY-TSA-130 → "SY-TSA" family, TL-N → "TL-N" exact, PD1354 → PD family)
+    if code_clean.startswith("SY-TSA"):
+        return "Stockyards Transition District"
+    if code_clean.startswith("SY-HCO") or code_clean.startswith("SY-HC"):
+        return "Stockyards Historic Core District"
+    if code_clean.startswith("SY-"):
+        return "Stockyards Historic District"
+    if code_clean.startswith("PI-"):
+        return "Panther Island Urban District"
+    if code_clean.startswith("TL-"):
+        return "Trinity Lakes Neighborhood District"
+    if code_clean.startswith("PD") and any(c.isdigit() for c in code_clean):
+        return "Planned Development"
+
+    # 4. Fall back to the first clause of the description
+    if description:
+        label = description.strip().split(";")[0].split(".")[0].split("(")[0].strip()[:80]
+        if label:
+            return label
+
+    return code_clean
 
 
 def _parse_zoning_request(text: str) -> Optional[dict]:
