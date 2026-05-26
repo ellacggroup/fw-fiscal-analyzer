@@ -1,0 +1,26 @@
+# Python
+backend/venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/**/*.pyc
+backend/*.pyc
+
+# Database (stays local — Railway uses its own persistent volume)
+backend/*.db
+*.db
+
+# Secrets — never upload your API key
+backend/.env
+.env
+
+# Node / React
+frontend/node_modules/
+frontend/dist/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+backend/zoning_error.log
