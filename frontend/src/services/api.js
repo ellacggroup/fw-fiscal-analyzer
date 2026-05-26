@@ -29,6 +29,20 @@ export async function listAgendas() {
   return data
 }
 
+export async function reanalyzeAgenda(uploadId) {
+  const { data } = await api.post(`/agendas/${uploadId}/reanalyze`, {}, {
+    timeout: 120_000,
+  })
+  return data
+}
+
+export async function reanalyzeAll() {
+  const { data } = await api.post('/agendas/reanalyze-all', {}, {
+    timeout: 300_000,
+  })
+  return data
+}
+
 export function exportExcelUrl(uploadId) {
   return `/agendas/${uploadId}/export/excel`
 }

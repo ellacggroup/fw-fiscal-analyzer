@@ -176,6 +176,26 @@ export default function FiscalCard({ item }) {
             <p className="text-xs text-gray-500 italic">{analysis.one_time_vs_recurring_note}</p>
           )}
 
+          {/* ── Annexation hearing notice ── */}
+          {analysis.annexation_hearing && (
+            <div className="rounded-xl border-2 border-amber-200 bg-amber-50 p-4">
+              <p className="text-xs font-bold text-amber-800 uppercase tracking-wide mb-1">
+                Procedural Step — No Direct Fiscal Impact
+              </p>
+              <p className="text-sm text-amber-900 leading-relaxed">
+                This item conducts the public hearing required by Texas law before an
+                annexation can be approved. The hearing itself does not change the city's
+                finances. Look for the <strong>annexation ordinance or resolution</strong> item
+                (usually a separate agenda item) for the actual fiscal impact analysis.
+              </p>
+            </div>
+          )}
+
+          {/* ── Site plan / plat two-tier analysis ── */}
+          {analysis.site_plan_type && (
+            <SitePlanDetail analysis={analysis} />
+          )}
+
           {/* ── Zoning Request Detail ── */}
           {analysis.zoning_request_parsed && (
             <ZoningDetail analysis={analysis} />
@@ -283,6 +303,121 @@ function DetailRow({ label, value, bold }) {
     </div>
   )
 }
+
+// ---------------------------------------------------------------------------
+// Site Plan / Plat two-tier component
+// ---------------------------------------------------------------------------
+
+function SitePlanDetail({ analysis: a }) {
+  const [showBroader, setShowBroader] = useState(false)
+  const bd = a.broader_development
+
+  return (
+    <div className="rounded-xl border-2 border-teal-200 bg-teal-50 p-4 space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h4 className="text-sm font-bold text-teal-900 uppercase tracking-wide">
+          {a.site_plan_type} Analysis
+        </h4>
+        {a.site_plan_is_reorganization && (
+          <span className="text-xs bg-gray-100 text-gray-600 border border-gray-200 px-2 py-0.5 rounded-full font-semibold">
+            Reorganisation — no new development
+          </span>
+        )}
+      </div>
+
+      {/* Tier 1: Direct parcel impact */}
+      <div className="bg-white rounded-lg border border-teal-200 p-3">
+        <p className="text-xs font-bold text-teal-700 uppercase mb-2">
+          Tier 1 — This property only
+        </p>
+        <p className="text-xs text-gray-600 leading-relaxed">{a.analysis_narrative}</p>
+        {!a.site_plan_is_reorganization && a.year1_net_impact != null && (
+          <div className="flex flex-wrap gap-4 mt-3">
+            <div>
+              <p className="text-[10px] text-gray-400 uppercase">Annual net (once built)</p>
+              <p className={`text-sm font-bold ${a.year1_net_impact >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                {fmtNet(a.year1_net_impact)}
+              </p>
+            </div>
+            {a.projection_40yr_net != null && (
+              <div>
+                <p className="text-[10px] text-gray-400 uppercase">40-yr NPV</p>
+                <p className={`text-sm font-bold ${a.projection_40yr_net >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                  {fmtNet(a.projection_40yr_net)}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Tier 2: Broader development (only if applicable) */}
+      {bd && !a.site_plan_is_reorganization && (
+        <div>
+          <button
+            onClick={() => setShowBroader(s => !s)}
+            className="w-full flex items-center justify-between bg-white border border-teal-200 rounded-lg px-4 py-2.5 text-sm font-semibold text-teal-800 hover:bg-teal-50 transition-colors"
+          >
+            <span>Tier 2 — Broader development potential (speculative)</span>
+            {showBroader
+              ? <ChevronUp className="w-4 h-4 flex-shrink-0" />
+              : <ChevronDown className="w-4 h-4 flex-shrink-0" />}
+          </button>
+
+          {showBroader && (
+            <div className="bg-white border border-teal-200 rounded-lg p-4 mt-1 space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-teal-700">{bd.scenario_label}</span>
+                <span className="text-[10px] bg-amber-100 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded-full font-bold">
+                  LOW confidence · speculative
+                </span>
+              </div>
+
+              <p className="text-xs text-gray-600 leading-relaxed">{bd.scenario_description}</p>
+
+              <div className="flex flex-wrap gap-4">
+                {bd.estimated_annual_net != null && (
+                  <div>
+                    <p className="text-[10px] text-gray-400 uppercase">Potential annual net</p>
+                    <p className={`text-sm font-bold ${bd.estimated_annual_net >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                      {fmtNet(bd.estimated_annual_net)}
+                    </p>
+                  </div>
+                )}
+                {bd.estimated_40yr_npv != null && (
+                  <div>
+                    <p className="text-[10px] text-gray-400 uppercase">40-yr potential NPV</p>
+                    <p className={`text-sm font-bold ${bd.estimated_40yr_npv >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                      {fmtNet(bd.estimated_40yr_npv)}
+                    </p>
+                  </div>
+                )}
+                {bd.estimated_jobs > 0 && (
+                  <div>
+                    <p className="text-[10px] text-gray-400 uppercase">Potential jobs</p>
+                    <p className="text-sm font-bold text-gray-700">~{bd.estimated_jobs}</p>
+                  </div>
+                )}
+                {bd.timeline && (
+                  <div>
+                    <p className="text-[10px] text-gray-400 uppercase">Timeline</p>
+                    <p className="text-sm font-semibold text-gray-600">{bd.timeline}</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                <span>{bd.caveat}</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 
 // ---------------------------------------------------------------------------
 // Zoning Detail component

@@ -108,6 +108,11 @@ export default function App() {
           agendas={agendaHistory}
           currentId={currentAgenda?.upload_id}
           onSelect={handleSelectHistory}
+          onReanalyzed={(result) => {
+            setCurrentAgenda(result)
+            setFilterRating('ALL')
+            setFilterCategory('ALL')
+          }}
         />
 
         <main className="flex-1 min-w-0 space-y-6">

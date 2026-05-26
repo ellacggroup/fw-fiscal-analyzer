@@ -140,6 +140,125 @@ async def _process_pdf(
 # Read endpoints
 # ---------------------------------------------------------------------------
 
+@router.post("/{upload_id}/reanalyze")
+async def reanalyze_agenda(upload_id: int, db: Session = Depends(get_db)):
+    """
+    Re-run fiscal analysis on a stored upload using the current analysis engine.
+    Deletes old items and replaces them with fresh results.
+    Useful when the analysis logic has been updated.
+    """
+    upload = db.query(AgendaUpload).filter(AgendaUpload.id == upload_id).first()
+    if not upload:
+        raise HTTPException(status_code=404, detail="Upload not found")
+    if not upload.raw_text:
+        raise HTTPException(
+            status_code=400,
+            detail="No raw text stored for this upload. Please re-upload the PDF.",
+        )
+
+    raw_items = extract_agenda_items(upload.raw_text)
+    if not raw_items:
+        raise HTTPException(status_code=422, detail="Could not re-parse agenda items from stored text.")
+
+    rule_analyses   = [analyze_fiscal_impact(item) for item in raw_items]
+    claude_analyses = analyze_items_with_claude(raw_items, upload.meeting_date)
+    using_claude    = claude_available()
+
+    # Replace old items
+    db.query(AgendaItem).filter(AgendaItem.upload_id == upload_id).delete()
+    db.commit()
+
+    saved_items = []
+    for item_data, rule, claude in zip(raw_items, rule_analyses, claude_analyses):
+        merged = dict(rule)
+        merged["claude_summary"]            = claude["summary"]
+        merged["risk_level"]                = claude["risk_level"]
+        merged["is_recurring"]              = claude["is_recurring"]
+        merged["one_time_vs_recurring_note"]= claude["one_time_vs_recurring_note"]
+        merged["key_concerns"]              = claude["key_concerns"]
+        merged["claude_available"]          = using_claude
+        if using_claude and claude["fiscal_impact_rating"] != "UNKNOWN":
+            merged["fiscal_impact_rating"]  = claude["fiscal_impact_rating"]
+
+        db_item = AgendaItem(
+            upload_id=upload_id,
+            item_number=item_data.get("item_number"),
+            title=item_data.get("title", ""),
+            description=item_data.get("description", ""),
+            section=item_data.get("section", ""),
+            category=_infer_category_label(merged, item_data.get("section", "")),
+            analysis=merged,
+        )
+        db.add(db_item)
+        db.commit()
+        db.refresh(db_item)
+        saved_items.append(db_item)
+
+    upload.item_count = len(saved_items)
+    db.commit()
+
+    return {
+        "upload_id":    upload_id,
+        "filename":     upload.filename,
+        "meeting_date": upload.meeting_date,
+        "item_count":   len(saved_items),
+        "items":        [_serialize(i) for i in saved_items],
+    }
+
+
+@router.post("/reanalyze-all")
+async def reanalyze_all_agendas(db: Session = Depends(get_db)):
+    """Re-run analysis on every stored upload. Fixes all historical results."""
+    uploads = db.query(AgendaUpload).order_by(AgendaUpload.id).all()
+    results = []
+    for upload in uploads:
+        if not upload.raw_text:
+            results.append({"upload_id": upload.id, "status": "skipped — no raw text"})
+            continue
+        try:
+            raw_items = extract_agenda_items(upload.raw_text)
+            rule_analyses   = [analyze_fiscal_impact(item) for item in raw_items]
+            claude_analyses = analyze_items_with_claude(raw_items, upload.meeting_date)
+            using_claude    = claude_available()
+
+            db.query(AgendaItem).filter(AgendaItem.upload_id == upload.id).delete()
+            db.commit()
+
+            count = 0
+            for item_data, rule, claude in zip(raw_items, rule_analyses, claude_analyses):
+                merged = dict(rule)
+                merged["claude_summary"]             = claude["summary"]
+                merged["risk_level"]                 = claude["risk_level"]
+                merged["is_recurring"]               = claude["is_recurring"]
+                merged["one_time_vs_recurring_note"] = claude["one_time_vs_recurring_note"]
+                merged["key_concerns"]               = claude["key_concerns"]
+                merged["claude_available"]           = using_claude
+                if using_claude and claude["fiscal_impact_rating"] != "UNKNOWN":
+                    merged["fiscal_impact_rating"]   = claude["fiscal_impact_rating"]
+
+                db_item = AgendaItem(
+                    upload_id=upload.id,
+                    item_number=item_data.get("item_number"),
+                    title=item_data.get("title", ""),
+                    description=item_data.get("description", ""),
+                    section=item_data.get("section", ""),
+                    category=_infer_category_label(merged, item_data.get("section", "")),
+                    analysis=merged,
+                )
+                db.add(db_item)
+                count += 1
+
+            db.commit()
+            upload.item_count = count
+            db.commit()
+            results.append({"upload_id": upload.id, "status": "ok", "items": count})
+
+        except Exception as exc:
+            results.append({"upload_id": upload.id, "status": "error", "detail": str(exc)})
+
+    return {"processed": len(results), "results": results}
+
+
 @router.get("/{upload_id}")
 def get_agenda(upload_id: int, db: Session = Depends(get_db)):
     upload = db.query(AgendaUpload).filter(AgendaUpload.id == upload_id).first()
