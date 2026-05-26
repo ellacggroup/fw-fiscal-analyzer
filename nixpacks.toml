@@ -2,7 +2,7 @@
 # Python 3.12 for the backend, Node 20 for building the React frontend.
 
 [phases.setup]
-nixPkgs = ["python312", "nodejs_20"]
+nixPkgs = ["python312Full", "nodejs_20"]
 
 [phases.install]
 cmds = [
