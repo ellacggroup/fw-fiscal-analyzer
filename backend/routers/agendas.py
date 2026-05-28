@@ -159,6 +159,66 @@ async def _process_pdf(
 # Read endpoints
 # ---------------------------------------------------------------------------
 
+@router.post("/reanalyze-all")
+async def reanalyze_all_agendas(db: Session = Depends(get_db)):
+    """Re-run analysis on every stored upload. Fixes all historical results."""
+    uploads = db.query(AgendaUpload).order_by(AgendaUpload.id).all()
+    results = []
+    for upload in uploads:
+        if not upload.raw_text:
+            results.append({"upload_id": upload.id, "status": "skipped — no raw text"})
+            continue
+        try:
+            raw_items = extract_agenda_items(upload.raw_text)
+            rule_analyses   = [analyze_fiscal_impact(item) for item in raw_items]
+            claude_analyses = analyze_items_with_claude(raw_items, upload.meeting_date, rule_analyses)
+            using_claude    = claude_available()
+
+            db.query(AgendaItem).filter(AgendaItem.upload_id == upload.id).delete()
+            db.commit()
+
+            count = 0
+            for item_data, rule, claude in zip(raw_items, rule_analyses, claude_analyses):
+                merged = dict(rule)
+                merged["claude_summary"]             = claude["summary"]
+                merged["risk_level"]                 = claude["risk_level"]
+                merged["is_recurring"]               = claude["is_recurring"]
+                merged["one_time_vs_recurring_note"] = claude["one_time_vs_recurring_note"]
+                merged["key_concerns"]               = claude["key_concerns"]
+                merged["claude_available"]           = using_claude
+                if using_claude and claude["fiscal_impact_rating"] != "UNKNOWN":
+                    merged["fiscal_impact_rating"]   = claude["fiscal_impact_rating"]
+                if rule.get("annexation_hearing"):
+                    merged["fiscal_impact_rating"] = "NEUTRAL"
+                if rule.get("zoning_request_parsed") and rule.get("fiscal_impact_rating") in ("POSITIVE", "NEUTRAL", "NEGATIVE"):
+                    merged["fiscal_impact_rating"] = rule["fiscal_impact_rating"]
+                if rule.get("site_plan_type") and rule.get("fiscal_impact_rating") in ("POSITIVE", "NEUTRAL"):
+                    if claude.get("fiscal_impact_rating") == "NEGATIVE":
+                        merged["fiscal_impact_rating"] = rule["fiscal_impact_rating"]
+
+                db_item = AgendaItem(
+                    upload_id=upload.id,
+                    item_number=item_data.get("item_number"),
+                    title=item_data.get("title", ""),
+                    description=item_data.get("description", ""),
+                    section=item_data.get("section", ""),
+                    category=_infer_category_label(merged, item_data.get("section", "")),
+                    analysis=merged,
+                )
+                db.add(db_item)
+                count += 1
+
+            db.commit()
+            upload.item_count = count
+            db.commit()
+            results.append({"upload_id": upload.id, "status": "ok", "items": count})
+
+        except Exception as exc:
+            results.append({"upload_id": upload.id, "status": "error", "detail": str(exc)})
+
+    return {"processed": len(results), "results": results}
+
+
 @router.post("/{upload_id}/reanalyze")
 async def reanalyze_agenda(upload_id: int, db: Session = Depends(get_db)):
     """
@@ -230,66 +290,6 @@ async def reanalyze_agenda(upload_id: int, db: Session = Depends(get_db)):
         "item_count":   len(saved_items),
         "items":        [_serialize(i) for i in saved_items],
     }
-
-
-@router.post("/reanalyze-all")
-async def reanalyze_all_agendas(db: Session = Depends(get_db)):
-    """Re-run analysis on every stored upload. Fixes all historical results."""
-    uploads = db.query(AgendaUpload).order_by(AgendaUpload.id).all()
-    results = []
-    for upload in uploads:
-        if not upload.raw_text:
-            results.append({"upload_id": upload.id, "status": "skipped — no raw text"})
-            continue
-        try:
-            raw_items = extract_agenda_items(upload.raw_text)
-            rule_analyses   = [analyze_fiscal_impact(item) for item in raw_items]
-            claude_analyses = analyze_items_with_claude(raw_items, upload.meeting_date, rule_analyses)
-            using_claude    = claude_available()
-
-            db.query(AgendaItem).filter(AgendaItem.upload_id == upload.id).delete()
-            db.commit()
-
-            count = 0
-            for item_data, rule, claude in zip(raw_items, rule_analyses, claude_analyses):
-                merged = dict(rule)
-                merged["claude_summary"]             = claude["summary"]
-                merged["risk_level"]                 = claude["risk_level"]
-                merged["is_recurring"]               = claude["is_recurring"]
-                merged["one_time_vs_recurring_note"] = claude["one_time_vs_recurring_note"]
-                merged["key_concerns"]               = claude["key_concerns"]
-                merged["claude_available"]           = using_claude
-                if using_claude and claude["fiscal_impact_rating"] != "UNKNOWN":
-                    merged["fiscal_impact_rating"]   = claude["fiscal_impact_rating"]
-                if rule.get("annexation_hearing"):
-                    merged["fiscal_impact_rating"] = "NEUTRAL"
-                if rule.get("zoning_request_parsed") and rule.get("fiscal_impact_rating") in ("POSITIVE", "NEUTRAL", "NEGATIVE"):
-                    merged["fiscal_impact_rating"] = rule["fiscal_impact_rating"]
-                if rule.get("site_plan_type") and rule.get("fiscal_impact_rating") in ("POSITIVE", "NEUTRAL"):
-                    if claude.get("fiscal_impact_rating") == "NEGATIVE":
-                        merged["fiscal_impact_rating"] = rule["fiscal_impact_rating"]
-
-                db_item = AgendaItem(
-                    upload_id=upload.id,
-                    item_number=item_data.get("item_number"),
-                    title=item_data.get("title", ""),
-                    description=item_data.get("description", ""),
-                    section=item_data.get("section", ""),
-                    category=_infer_category_label(merged, item_data.get("section", "")),
-                    analysis=merged,
-                )
-                db.add(db_item)
-                count += 1
-
-            db.commit()
-            upload.item_count = count
-            db.commit()
-            results.append({"upload_id": upload.id, "status": "ok", "items": count})
-
-        except Exception as exc:
-            results.append({"upload_id": upload.id, "status": "error", "detail": str(exc)})
-
-    return {"processed": len(results), "results": results}
 
 
 @router.get("/{upload_id}")
