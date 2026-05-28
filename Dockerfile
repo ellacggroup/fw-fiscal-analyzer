@@ -6,6 +6,9 @@ RUN apt-get update && apt-get install -y curl && \
     apt-get install -y nodejs && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Prevent Python from writing .pyc files so stale bytecode never persists
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+
 WORKDIR /app
 
 # Install Python dependencies
@@ -22,5 +25,10 @@ RUN cd frontend && npm run build
 # Copy the rest of the backend
 COPY backend/ backend/
 
-# Start the server (Railway injects $PORT automatically)
-CMD cd backend && uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}
+# Ensure /data directory exists for the SQLite database (Railway volume mounts here)
+RUN mkdir -p /data
+
+# Start the server — clear any stale bytecode first, then launch
+# (Railway preserves runtime files across redeploys; this guarantees fresh code)
+CMD find /app -name "__pycache__" -type d | xargs rm -rf 2>/dev/null; \
+    cd backend && uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}

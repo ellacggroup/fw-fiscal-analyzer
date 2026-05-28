@@ -5,10 +5,17 @@ from sqlalchemy import Column, DateTime, Integer, JSON, String, Text, create_eng
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
-# Local default: creates fw_fiscal.db next to this file.
-# On Railway, set DATABASE_URL=sqlite:////data/fw_fiscal.db and add a
-# persistent volume mounted at /data so the database survives redeploys.
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./fw_fiscal.db")
+# Local development: sqlite:///./fw_fiscal.db (relative to backend/)
+# Railway production: DATABASE_URL env var should be sqlite:////data/fw_fiscal.db
+# with a persistent volume mounted at /data.  Falls back to /data/fw_fiscal.db
+# when running inside a container (detected by /data directory existing).
+import pathlib as _pl
+_default_db = (
+    "sqlite:////data/fw_fiscal.db"
+    if _pl.Path("/data").exists()
+    else "sqlite:///./fw_fiscal.db"
+)
+DATABASE_URL = os.getenv("DATABASE_URL", _default_db)
 
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
