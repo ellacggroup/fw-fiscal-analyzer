@@ -46,8 +46,8 @@ def health():
         "status": "ok",
         "service": "Fort Worth Fiscal Impact Analyzer",
         "claude_enabled": claude_available(),
-        "version": "3.3.0",
-        "build": "2026-05-28-bytecode-fix",
+        "version": "3.4.0",
+        "build": "2026-05-28-startup-log",
     }
 
 
