@@ -40,9 +40,6 @@ export default function HistorySidebar({ agendas, currentId, onSelect, onReanaly
               <FileText className="w-4 h-4 text-gray-400 flex-shrink-0 mt-0.5" />
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-semibold text-gray-800 truncate">{a.filename}</p>
-                {a.meeting_date && (
-                  <p className="text-xs text-gray-500 mt-0.5">{a.meeting_date}</p>
-                )}
                 <div className="flex items-center gap-1 mt-1">
                   <Clock className="w-3 h-3 text-gray-400" />
                   <span className="text-xs text-gray-400">

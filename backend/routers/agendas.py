@@ -64,6 +64,16 @@ async def _process_pdf(
         )
 
     meeting_date = detect_meeting_date(raw_text)
+    display_name = _make_display_name(meeting_date, filename)
+
+    # Deduplication: if an agenda with this meeting date already exists, remove it
+    if meeting_date:
+        existing = db.query(AgendaUpload).filter(AgendaUpload.meeting_date == meeting_date).first()
+        if existing:
+            db.query(AgendaItem).filter(AgendaItem.upload_id == existing.id).delete()
+            db.delete(existing)
+            db.commit()
+
     raw_items = extract_agenda_items(raw_text)
 
     if not raw_items:
@@ -118,7 +128,7 @@ async def _process_pdf(
 
     # Persist
     upload = AgendaUpload(
-        filename=filename,
+        filename=display_name,
         meeting_date=meeting_date,
         raw_text=raw_text[:100_000],
         item_count=len(raw_items),
@@ -161,8 +171,24 @@ async def _process_pdf(
 
 @router.post("/reanalyze-all")
 async def reanalyze_all_agendas(db: Session = Depends(get_db)):
-    """Re-run analysis on every stored upload. Fixes all historical results."""
+    """Re-run analysis on every stored upload. Deduplicates by meeting date and fixes filenames."""
     uploads = db.query(AgendaUpload).order_by(AgendaUpload.id).all()
+
+    # Deduplicate: for each meeting_date keep only the most recent upload_id
+    seen_dates: dict = {}
+    for u in uploads:
+        if u.meeting_date:
+            if u.meeting_date in seen_dates:
+                # Remove the older one
+                older_id = seen_dates[u.meeting_date]
+                db.query(AgendaItem).filter(AgendaItem.upload_id == older_id).delete()
+                db.query(AgendaUpload).filter(AgendaUpload.id == older_id).delete()
+                db.commit()
+            seen_dates[u.meeting_date] = u.id
+
+    # Refresh list after deduplication
+    uploads = db.query(AgendaUpload).order_by(AgendaUpload.id).all()
+
     results = []
     for upload in uploads:
         if not upload.raw_text:
@@ -210,8 +236,10 @@ async def reanalyze_all_agendas(db: Session = Depends(get_db)):
 
             db.commit()
             upload.item_count = count
+            # Fix filename to use meeting date as display name
+            upload.filename = _make_display_name(upload.meeting_date, upload.filename)
             db.commit()
-            results.append({"upload_id": upload.id, "status": "ok", "items": count})
+            results.append({"upload_id": upload.id, "status": "ok", "items": count, "name": upload.filename})
 
         except Exception as exc:
             results.append({"upload_id": upload.id, "status": "error", "detail": str(exc)})
@@ -367,3 +395,12 @@ def _infer_category_label(analysis: dict, section: str = "") -> str:
         return "Personnel"
 
     return cat or "Other"
+
+
+def _make_display_name(meeting_date: str | None, fallback: str) -> str:
+    """Return a human-readable agenda name based on the meeting date."""
+    if meeting_date:
+        return f"City Council Meeting – {meeting_date}"
+    # Strip raw filename extension as a last resort
+    import os
+    return os.path.splitext(fallback)[0] if fallback else "Agenda"
