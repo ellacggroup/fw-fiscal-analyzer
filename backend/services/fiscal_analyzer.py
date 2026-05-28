@@ -359,6 +359,14 @@ _ZC_FROM_TO_BARE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
+# Third fallback: PD amendment — "To: Amend PD[number] ..." with no From: clause.
+# Fort Worth uses this pattern when amending an existing Planned Development (e.g. ZC-26-040, ZC-26-041).
+_ZC_PD_AMEND = re.compile(
+    r'To:\s+Amend\s+' + _Q + r'?(PD\d+)' + _Q + r'?\s+(.*?)'
+    r'(?=\s*(?:\(Recommended|Recommended|Speaker|\Z)|(?=\n\n)|\Z)',
+    re.IGNORECASE | re.DOTALL,
+)
+
 # Map Fort Worth zone codes to plain-English land-use labels.
 # Covers all zone codes seen across FW agendas as of 2026.
 _FW_ZONE_MAP = {
@@ -495,6 +503,22 @@ def _parse_zoning_request(text: str) -> Optional[dict]:
     if not m:
         m = _ZC_FROM_TO_BARE.search(text)
     if not m:
+        # PD amendment: "To: Amend PD[number] ..." with no explicit From: clause
+        m3 = _ZC_PD_AMEND.search(text)
+        if m3:
+            pd_code = m3.group(1).strip()
+            to_desc = m3.group(2).strip().rstrip(";,")
+            proto   = _classify_land_use("", to_desc) or "Unknown / Not Applicable"
+            return {
+                "from_code":  pd_code,
+                "from_label": "Planned Development",
+                "from_desc":  "Existing conditions",
+                "from_proto": proto,
+                "to_code":    pd_code,
+                "to_label":   "Planned Development",
+                "to_desc":    to_desc[:200],
+                "to_proto":   proto,
+            }
         return None
 
     from_code = m.group(1).strip()

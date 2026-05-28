@@ -442,15 +442,20 @@ function ZoningDetail({ analysis: a }) {
   const [showScenarios, setShowScenarios] = useState(false)
   const scenarios = a.by_right_scenarios || []
   const statedFiscal = a.stated_use_fiscal
+  const isPdAmend = a.zoning_from_code === a.zoning_to_code && a.zoning_from_code?.startsWith('PD')
 
   return (
     <div className="rounded-xl border-2 border-indigo-200 bg-indigo-50 p-4 space-y-5">
-      <h4 className="text-sm font-bold text-indigo-900 uppercase tracking-wide">Zoning Request Detail</h4>
+      <h4 className="text-sm font-bold text-indigo-900 uppercase tracking-wide">
+        {isPdAmend ? 'PD Amendment Detail' : 'Zoning Request Detail'}
+      </h4>
 
       {/* From → To */}
       <div className="flex items-stretch gap-3 flex-wrap">
         <div className="flex-1 min-w-[140px] bg-white rounded-lg border border-indigo-200 p-3">
-          <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Current Zoning</p>
+          <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">
+            {isPdAmend ? 'Existing PD' : 'Current Zoning'}
+          </p>
           <p className="text-sm font-bold text-gray-800 font-mono">{a.zoning_from_code}</p>
           <p className="text-sm text-gray-600 mt-0.5">{a.zoning_from_label}</p>
           {a.zoning_from_desc && a.zoning_from_desc !== a.zoning_from_label && (
@@ -461,7 +466,9 @@ function ZoningDetail({ analysis: a }) {
           <ArrowRight className="w-5 h-5 text-indigo-400" />
         </div>
         <div className="flex-1 min-w-[140px] bg-indigo-100 rounded-lg border-2 border-indigo-300 p-3">
-          <p className="text-[10px] font-bold text-indigo-500 uppercase mb-1">Proposed Zoning</p>
+          <p className="text-[10px] font-bold text-indigo-500 uppercase mb-1">
+            {isPdAmend ? 'Proposed Amendments' : 'Proposed Zoning'}
+          </p>
           <p className="text-sm font-bold text-indigo-900 font-mono">{a.zoning_to_code}</p>
           <p className="text-sm text-indigo-700 mt-0.5">{a.zoning_to_label}</p>
           {a.zoning_to_desc && a.zoning_to_desc !== a.zoning_to_label && (
