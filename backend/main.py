@@ -46,8 +46,8 @@ def health():
         "status": "ok",
         "service": "Fort Worth Fiscal Impact Analyzer",
         "claude_enabled": claude_available(),
-        "version": "3.1.0",
-        "build": "2026-05-26-zoning-fixes",
+        "version": "3.2.0",
+        "build": "2026-05-28-route-fix",
     }
 
 
