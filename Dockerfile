@@ -31,6 +31,4 @@ RUN mkdir -p /data
 # Start the server — clear any stale bytecode first, then launch
 # (Railway preserves runtime files across redeploys; this guarantees fresh code)
 CMD find /app -name "__pycache__" -type d | xargs rm -rf 2>/dev/null; \
-    echo "=== STARTUP: main.py version ===" && \
-    grep version /app/backend/main.py && \
     cd /app/backend && uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}

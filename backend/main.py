@@ -13,11 +13,6 @@ from routers import agendas
 from routers import export as export_router
 from services.claude_analyzer import claude_available
 
-import sys as _sys
-print(f"[STARTUP] Loading main.py from: {__file__}", flush=True)
-print(f"[STARTUP] Python: {_sys.version}", flush=True)
-print(f"[STARTUP] sys.path: {_sys.path[:3]}", flush=True)
-
 app = FastAPI(
     title="Fort Worth Fiscal Impact Analyzer",
     description="AI-powered fiscal analysis for Fort Worth City Council agenda items",
@@ -52,7 +47,7 @@ def health():
         "service": "Fort Worth Fiscal Impact Analyzer",
         "claude_enabled": claude_available(),
         "version": "3.5.0",
-        "build": "2026-05-28-file-debug",
+        "build": "2026-05-28-all-fixes",
     }
 
 
