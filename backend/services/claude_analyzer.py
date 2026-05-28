@@ -3,7 +3,7 @@ Claude API integration for Fort Worth fiscal impact analysis.
 
 Runs after the rule-based analyzer to add qualitative analysis:
   - plain-English summary
-  - fiscal impact rating (overrides rule-based when Claude is available)
+  - fiscal impact rating (may override rule-based when Claude has a stronger signal)
   - risk level (LOW / MEDIUM / HIGH)
   - one-time vs recurring flag
   - key concerns
@@ -19,7 +19,7 @@ from typing import Optional
 import anthropic
 
 _client: Optional[anthropic.Anthropic] = None
-BATCH_SIZE = 12  # items per Claude call; keeps each prompt well under 4K tokens
+BATCH_SIZE = 6  # smaller batches = more attention per item from Claude
 
 
 def _get_client() -> Optional[anthropic.Anthropic]:
@@ -39,19 +39,24 @@ def claude_available() -> bool:
 def analyze_items_with_claude(
     items: list[dict],
     meeting_date: Optional[str] = None,
+    rule_analyses: Optional[list[dict]] = None,
 ) -> list[dict]:
     """
     Return one claude_analysis dict per item (same order as input).
     Falls back to empty stubs if the API is unavailable.
+    Accepts optional rule_analyses so Claude can see what the rule engine found.
     """
     client = _get_client()
     if client is None:
         return [_empty() for _ in items]
 
+    rule_analyses = rule_analyses or [{} for _ in items]
+
     results: list[dict] = []
     for i in range(0, len(items), BATCH_SIZE):
-        batch = items[i : i + BATCH_SIZE]
-        results.extend(_analyze_batch(client, batch, meeting_date))
+        batch_items = items[i : i + BATCH_SIZE]
+        batch_rules = rule_analyses[i : i + BATCH_SIZE]
+        results.extend(_analyze_batch(client, batch_items, batch_rules, meeting_date))
     return results
 
 
@@ -63,7 +68,7 @@ _SYSTEM_PROMPT = """\
 You are a municipal fiscal analyst specializing in Fort Worth, Texas city government.
 You produce concise, accurate fiscal impact assessments for a non-technical civic audience.
 
-Fort Worth context:
+## Fort Worth Context
 - Property tax rate: $0.7125 per $100 assessed value (FY2026)
 - City share of sales tax: 1%
 - M&C = Manager & Council report (standard approval mechanism)
@@ -74,14 +79,56 @@ Fort Worth context:
   appropriation itself is new spending
 - Tax abatements reduce future property tax revenue — flag as NEGATIVE for long-term impact
 - Grants and interlocal reimbursements are POSITIVE (incoming revenue)
+
+## Fiscal Performance by Land Use (Fate TX 40-year methodology)
+| Land Use              | R/C Ratio | Fiscal Character |
+|-----------------------|-----------|-----------------|
+| Commercial Retail     | 2.70      | Strongly positive |
+| Industrial/Warehouse  | 2.32      | Positive |
+| Office/Business Park  | 2.26      | Positive |
+| Mixed-Use             | 1.74      | Positive |
+| Multifamily           | 0.97      | Roughly neutral |
+| Single-Family         | 0.72      | Net cost to city |
+| Public/Institutional  | 0.07      | Significant net cost |
+
+## CRITICAL RULES — FOLLOW WITHOUT EXCEPTION
+
+### Rule 1: Rating and Summary Must Be Consistent
+Your `fiscal_impact_rating` MUST match your `summary`. It is an error to rate an item
+POSITIVE while the summary says it "worsens the city's fiscal position" or "costs the
+city money." It is an error to rate an item NEGATIVE while the summary describes a net
+benefit. If you find a contradiction, fix the rating to match the summary.
+
+### Rule 2: Public Hearings Are Always NEUTRAL
+A public hearing on annexation, zoning, or any other matter is a PROCEDURAL step
+required by law. It has NO direct fiscal impact — it is not an approval or denial.
+ALWAYS rate public hearings as NEUTRAL with impact_type = none.
+Example: "Conduct a public hearing on annexation of [property]" → NEUTRAL.
+"Approve annexation of [property]" → analyze normally.
+
+### Rule 3: Zoning Changes — Rate the Direction of Change
+For zoning items, rate based on whether the FROM→TO change IMPROVES or WORSENS
+the city's fiscal position using the R/C ratio table above:
+- If proposed use has higher R/C than current use → POSITIVE
+- If proposed use has lower R/C than current use → NEGATIVE
+- If roughly equivalent → NEUTRAL
+Do NOT rate simply because the destination zone is "commercial" (positive) without
+considering what is being rezoned FROM.
+
+### Rule 4: Site Plans and Plats
+A plat or site plan APPROVAL is a regulatory step. The approval itself is NEUTRAL.
+Describe what development it enables and its fiscal implications. Do not rate the
+approval as NEGATIVE just because the underlying land use has a low R/C ratio.
+The broader development context matters.
 """
 
 _ITEM_SCHEMA = """\
 For EACH item return a JSON object with these exact keys:
   "summary"                  : string  — 2-3 sentence plain-English explanation of what the
-                                         item does and its net fiscal impact. Write for a
-                                         general Fort Worth resident, not a financial expert.
+                                         item does and its net fiscal impact. MUST match the
+                                         fiscal_impact_rating (no contradictions).
   "fiscal_impact_rating"     : string  — one of: "POSITIVE", "NEUTRAL", "NEGATIVE", "UNKNOWN"
+                                         Must be consistent with the summary above.
   "risk_level"               : string  — one of: "LOW", "MEDIUM", "HIGH"
   "is_recurring"             : boolean or null  — true = ongoing annual obligation;
                                                    false = one-time; null = unclear
@@ -92,16 +139,46 @@ For EACH item return a JSON object with these exact keys:
 """
 
 
-def _build_prompt(items: list[dict], meeting_date: Optional[str]) -> str:
+def _build_prompt(
+    items: list[dict],
+    rule_analyses: list[dict],
+    meeting_date: Optional[str],
+) -> str:
     date_line = f"Meeting date: {meeting_date}\n\n" if meeting_date else ""
 
     item_blocks = []
-    for idx, item in enumerate(items, 1):
+    for idx, (item, rule) in enumerate(zip(items, rule_analyses), 1):
         section = f" [{item.get('section', '')}]" if item.get("section") else ""
+        category = rule.get("category", "")
+        rule_rating = rule.get("fiscal_impact_rating", "")
+        is_hearing = rule.get("annexation_hearing", False)
+        zoning_parsed = rule.get("zoning_request_parsed", False)
+
+        context_lines = []
+        if category:
+            context_lines.append(f"Category: {category}")
+        if is_hearing:
+            context_lines.append("NOTE: This is an annexation public hearing (procedural) — must be rated NEUTRAL")
+        elif rule_rating and not zoning_parsed:
+            context_lines.append(f"Rule-based rating: {rule_rating}")
+        if zoning_parsed:
+            from_label = rule.get("zoning_from_label", "")
+            to_label   = rule.get("zoning_to_label", "")
+            net_change = rule.get("zoning_annual_net_change")
+            if from_label and to_label:
+                context_lines.append(f"Zoning: {rule.get('zoning_from_code')} ({from_label}) → {rule.get('zoning_to_code')} ({to_label})")
+            if net_change is not None:
+                direction = "improves" if net_change > 0 else "worsens"
+                context_lines.append(f"R/C analysis: rezoning {direction} city fiscal position by ~${abs(net_change):,}/yr")
+
+        context_block = ""
+        if context_lines:
+            context_block = "\n[Context: " + "; ".join(context_lines) + "]"
+
         item_blocks.append(
-            f"### Item {idx}{section}\n"
+            f"### Item {idx}{section}{context_block}\n"
             f"Title: {item.get('title', '(no title)')}\n"
-            f"Description: {(item.get('description') or '')[:600]}"
+            f"Description: {(item.get('description') or '')[:800]}"
         )
 
     return (
@@ -117,9 +194,10 @@ def _build_prompt(items: list[dict], meeting_date: Optional[str]) -> str:
 def _analyze_batch(
     client: anthropic.Anthropic,
     items: list[dict],
+    rule_analyses: list[dict],
     meeting_date: Optional[str],
 ) -> list[dict]:
-    prompt = _build_prompt(items, meeting_date)
+    prompt = _build_prompt(items, rule_analyses, meeting_date)
     try:
         msg = client.messages.create(
             model="claude-sonnet-4-6",

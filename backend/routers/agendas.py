@@ -78,11 +78,13 @@ async def _process_pdf(
     # Rule-based analysis (instant, always available)
     rule_analyses = [analyze_fiscal_impact(item) for item in raw_items]
 
-    # Claude analysis (optional; batched)
-    claude_analyses = analyze_items_with_claude(raw_items, meeting_date)
+    # Claude analysis (optional; batched) — pass rule analyses for context
+    claude_analyses = analyze_items_with_claude(raw_items, meeting_date, rule_analyses)
     using_claude = claude_available()
 
-    # Merge: Claude overrides fiscal_impact_rating; everything else is additive
+    # Merge: Claude adds qualitative narrative; rule engine owns ratings for
+    # items where it has authoritative data (annexation hearings, parsed zoning,
+    # site plans with broader development).
     merged_analyses = []
     for rule, claude in zip(rule_analyses, claude_analyses):
         merged = dict(rule)
@@ -92,9 +94,26 @@ async def _process_pdf(
         merged["one_time_vs_recurring_note"] = claude["one_time_vs_recurring_note"]
         merged["key_concerns"] = claude["key_concerns"]
         merged["claude_available"] = using_claude
-        # Claude rating takes precedence when available and not unknown
+
         if using_claude and claude["fiscal_impact_rating"] != "UNKNOWN":
             merged["fiscal_impact_rating"] = claude["fiscal_impact_rating"]
+
+        # Guard 1: procedural annexation hearings are always NEUTRAL —
+        # never let Claude mark a hearing as NEGATIVE or POSITIVE.
+        if rule.get("annexation_hearing"):
+            merged["fiscal_impact_rating"] = "NEUTRAL"
+
+        # Guard 2: when the rule engine parsed the zoning FROM/TO codes,
+        # trust its R/C-based rating over Claude's batch estimate.
+        if rule.get("zoning_request_parsed") and rule.get("fiscal_impact_rating") in ("POSITIVE", "NEUTRAL", "NEGATIVE"):
+            merged["fiscal_impact_rating"] = rule["fiscal_impact_rating"]
+
+        # Guard 3: site plan / plat approvals — the rule engine rates these
+        # based on broader development potential; don't let Claude downgrade.
+        if rule.get("site_plan_type") and rule.get("fiscal_impact_rating") in ("POSITIVE", "NEUTRAL"):
+            if claude.get("fiscal_impact_rating") == "NEGATIVE":
+                merged["fiscal_impact_rating"] = rule["fiscal_impact_rating"]
+
         merged_analyses.append(merged)
 
     # Persist
@@ -161,7 +180,7 @@ async def reanalyze_agenda(upload_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=422, detail="Could not re-parse agenda items from stored text.")
 
     rule_analyses   = [analyze_fiscal_impact(item) for item in raw_items]
-    claude_analyses = analyze_items_with_claude(raw_items, upload.meeting_date)
+    claude_analyses = analyze_items_with_claude(raw_items, upload.meeting_date, rule_analyses)
     using_claude    = claude_available()
 
     # Replace old items
@@ -179,6 +198,13 @@ async def reanalyze_agenda(upload_id: int, db: Session = Depends(get_db)):
         merged["claude_available"]          = using_claude
         if using_claude and claude["fiscal_impact_rating"] != "UNKNOWN":
             merged["fiscal_impact_rating"]  = claude["fiscal_impact_rating"]
+        if rule.get("annexation_hearing"):
+            merged["fiscal_impact_rating"] = "NEUTRAL"
+        if rule.get("zoning_request_parsed") and rule.get("fiscal_impact_rating") in ("POSITIVE", "NEUTRAL", "NEGATIVE"):
+            merged["fiscal_impact_rating"] = rule["fiscal_impact_rating"]
+        if rule.get("site_plan_type") and rule.get("fiscal_impact_rating") in ("POSITIVE", "NEUTRAL"):
+            if claude.get("fiscal_impact_rating") == "NEGATIVE":
+                merged["fiscal_impact_rating"] = rule["fiscal_impact_rating"]
 
         db_item = AgendaItem(
             upload_id=upload_id,
@@ -218,7 +244,7 @@ async def reanalyze_all_agendas(db: Session = Depends(get_db)):
         try:
             raw_items = extract_agenda_items(upload.raw_text)
             rule_analyses   = [analyze_fiscal_impact(item) for item in raw_items]
-            claude_analyses = analyze_items_with_claude(raw_items, upload.meeting_date)
+            claude_analyses = analyze_items_with_claude(raw_items, upload.meeting_date, rule_analyses)
             using_claude    = claude_available()
 
             db.query(AgendaItem).filter(AgendaItem.upload_id == upload.id).delete()
@@ -235,6 +261,13 @@ async def reanalyze_all_agendas(db: Session = Depends(get_db)):
                 merged["claude_available"]           = using_claude
                 if using_claude and claude["fiscal_impact_rating"] != "UNKNOWN":
                     merged["fiscal_impact_rating"]   = claude["fiscal_impact_rating"]
+                if rule.get("annexation_hearing"):
+                    merged["fiscal_impact_rating"] = "NEUTRAL"
+                if rule.get("zoning_request_parsed") and rule.get("fiscal_impact_rating") in ("POSITIVE", "NEUTRAL", "NEGATIVE"):
+                    merged["fiscal_impact_rating"] = rule["fiscal_impact_rating"]
+                if rule.get("site_plan_type") and rule.get("fiscal_impact_rating") in ("POSITIVE", "NEUTRAL"):
+                    if claude.get("fiscal_impact_rating") == "NEGATIVE":
+                        merged["fiscal_impact_rating"] = rule["fiscal_impact_rating"]
 
                 db_item = AgendaItem(
                     upload_id=upload.id,

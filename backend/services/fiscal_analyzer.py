@@ -335,14 +335,27 @@ def _project_40yr(
 #   Standard:     From: "A-43" One-Family   To: "E" Neighborhood Commercial
 #   PD amendment: From: "PD894" desc        To: Amend "PD894" new desc
 #   Same zone+CUP:From: "K" Heavy Ind.      To: "K" Heavy Ind. with CUP
+#   Curly quotes: From: “A-5” ... To: “PD/E” ...
 #
 # The (?:Amend\s+)? group makes the word "Amend" optional after "To:" so
 # PD amendment items parse correctly even though the zone code isn't first.
+# Character class [“”‘’"] matches straight AND curly quotes.
+_Q = r'[“”‘’"]'  # any open/close quote variant
+
 _ZC_FROM_TO = re.compile(
-    r'From:\s*"([^"]+)"\s*(.*?)'
+    r'From:\s*' + _Q + r'([^"“”‘’]+)' + _Q + r'\s*(.*?)'
     r'\s+To:\s*(?:Amend\s+)?'
-    r'"([^"]+)"\s*(.*?)'
-    r'(?=\s*(?:\(Recommended|Recommended|Speaker|$))',
+    + _Q + r'([^"“”‘’]+)' + _Q + r'\s*(.*?)'
+    r'(?=\s*(?:\(Recommended|Recommended|Speaker|\Z)|(?=\n\n)|\Z)',
+    re.IGNORECASE | re.DOTALL,
+)
+
+# Fallback: no quotes at all — match bare zone code (letters, digits, /, -)
+# Used when the PDF strips quote characters entirely.
+_ZC_FROM_TO_BARE = re.compile(
+    r'From:\s+([A-Z][A-Z0-9/\-]*(?:-\d+)?)\s+(.*?)'
+    r'\s+To:\s+(?:Amend\s+)?([A-Z][A-Z0-9/\-]*(?:-\d+)?)\s+(.*?)'
+    r'(?=\s*(?:\(Recommended|Recommended|Speaker|\Z)|(?=\n\n)|\Z)',
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -476,8 +489,11 @@ def _parse_zoning_request(text: str) -> Optional[dict]:
     """
     Extract From/To zoning info from a Fort Worth ZC item description.
     Returns dict or None if pattern not found.
+    Tries quoted regex first, then bare-code fallback.
     """
     m = _ZC_FROM_TO.search(text)
+    if not m:
+        m = _ZC_FROM_TO_BARE.search(text)
     if not m:
         return None
 
@@ -874,7 +890,7 @@ def _is_annexation_hearing(title: str, description: str) -> bool:
 
 def _annexation_hearing_result() -> dict:
     return {
-        "fiscal_impact_rating": "UNKNOWN",
+        "fiscal_impact_rating": "NEUTRAL",
         "confidence": "HIGH",
         "year1_revenue_estimate": None,
         "year1_cost_estimate":    None,
@@ -942,7 +958,7 @@ def _site_plan_analysis(
     if is_replat or is_row_action:
         # Reorganisation — no new development, no new fiscal impact
         base["site_plan_is_reorganization"] = True
-        base["fiscal_impact_rating"]        = "UNKNOWN"
+        base["fiscal_impact_rating"]        = "NEUTRAL"
         base["analysis_narrative"] = (
             f"This {action_type.lower()} reorganises existing property boundaries or "
             f"adjusts a right-of-way. It does not create new development by itself. "
@@ -958,13 +974,22 @@ def _site_plan_analysis(
         f"Direct parcel impact: once built out, this {action_type.lower()} on "
         f"{'approximately ' + str(round(assumed_acres, 1)) + ' acres of ' if acreage else ''}"
         f"{land_use.lower()} would generate the revenue and cost estimates shown above. "
-        f"A {action_type.lower()} approval does not guarantee construction — fiscal "
+        f"The {action_type.lower()} approval itself is a regulatory step — fiscal "
         f"impact materialises only when building permits are issued and structures are completed."
     )
     base["analysis_narrative"] = direct_note
 
     # ── Tier 2: broader development potential ────────────────────────────
-    base["broader_development"] = _estimate_broader_development(land_use, assumed_acres)
+    bd = _estimate_broader_development(land_use, assumed_acres)
+    base["broader_development"] = bd
+
+    # ── Overall rating: the approval is always neutral as a regulatory step.
+    # Upgrade to POSITIVE when broader development creates meaningful fiscal gain.
+    if bd and (bd.get("estimated_annual_net") or 0) > 500:
+        base["fiscal_impact_rating"] = "POSITIVE"
+    else:
+        base["fiscal_impact_rating"] = "NEUTRAL"
+
     return base
 
 
