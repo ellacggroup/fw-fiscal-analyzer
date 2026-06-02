@@ -61,8 +61,22 @@ const COMP_PLAN_CATEGORIES = new Set([
 const COMP_PLAN_KW = /zon(ing)?|annex|plat|subdivis|site\s*plan|replat|rezoning|development|land\s*use|real\s*estate|parcel|acreage|easement|right.of.way|ZC[\s\-]?\d|SP[\s\-]?\d|SUP[\s\-]?\d|PD[\s\-]?\d|variance|conditional\s*use|overlay|corridor|concept\s*plan|growth\s*center|mixed.use/i
 
 function isCompPlanItem(item) {
+  // Category match
   if (COMP_PLAN_CATEGORIES.has(item.category)) return true
-  const text = `${item.title || ''} ${item.description || ''}`
+
+  // Fiscal analyzer flags — most reliable signal
+  const a = item.analysis || {}
+  if (a.zoning_request_parsed) return true
+  if (a.site_plan_type) return true
+  if (a.annexation_hearing) return true
+  if (a.land_use_type && a.land_use_type !== 'N/A') return true
+
+  // Section header (e.g. "ZONING HEARINGS", "LAND USE")
+  const section = (item.section || '').toUpperCase()
+  if (section.includes('ZON') || section.includes('LAND') || section.includes('ANNEX') || section.includes('PLAT')) return true
+
+  // Keyword scan across all text fields
+  const text = `${item.title || ''} ${item.description || ''} ${item.category || ''} ${a.category || ''}`
   return COMP_PLAN_KW.test(text)
 }
 
