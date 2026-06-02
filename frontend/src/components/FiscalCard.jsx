@@ -54,6 +54,18 @@ function fmtRatio(r) {
   return r.toFixed(2)
 }
 
+const COMP_PLAN_CATEGORIES = new Set([
+  'Zoning Change', 'Land / Real Estate', 'Public Hearing', 'Annexation',
+])
+
+const COMP_PLAN_KW = /zon(ing)?|annex|plat|subdivis|site\s*plan|replat|rezoning|development|land\s*use|real\s*estate|parcel|acreage|easement|right.of.way|ZC[\s\-]?\d|SP[\s\-]?\d|SUP[\s\-]?\d|PD[\s\-]?\d|variance|conditional\s*use|overlay|corridor|concept\s*plan|growth\s*center|mixed.use/i
+
+function isCompPlanItem(item) {
+  if (COMP_PLAN_CATEGORIES.has(item.category)) return true
+  const text = `${item.title || ''} ${item.description || ''}`
+  return COMP_PLAN_KW.test(text)
+}
+
 export default function FiscalCard({ item }) {
   const [expanded, setExpanded] = useState(false)
   const analysis = item.analysis || {}
@@ -192,7 +204,7 @@ export default function FiscalCard({ item }) {
           )}
 
           {/* ── Comprehensive Plan Land Use ── */}
-          {(analysis.comp_plan_relevant || analysis.comp_plan_lu_code || analysis.comp_plan_lookup_status) && (
+          {isCompPlanItem(item) && (
             <CompPlanSection analysis={analysis} />
           )}
 
