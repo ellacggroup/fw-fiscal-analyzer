@@ -99,12 +99,24 @@ REAL_ESTATE_CATEGORIES = {
     "Land / Real Estate",
     "Public Hearing",
     "Annexation",
+    "Other",  # catch-all — filter by keywords below
 }
 
 REAL_ESTATE_KEYWORDS = re.compile(
-    r"\b(zon|annex|plat|subdivis|site plan|replat|rezoning|development|"
-    r"land use|real estate|property|parcel|acreage|lot|deed|"
-    r"convey|acqui|easement|right.of.way|ROW|PD\s*\d|ZC\s*\d|SP\s*\d)\b",
+    r"\b("
+    r"zon(ing)?|annex(ation)?|plat|subdivis|site\s*plan|replat|rezoning|"
+    r"development|land\s*use|real\s*estate|property|parcel|acreage|"
+    r"lot|deed|convey|acqui|easement|right.of.way|"
+    r"ROW|PD[\s\-]?\d|ZC[\s\-]?\d|SP[\s\-]?\d|SUP[\s\-]?\d|"
+    r"specific\s*use|conditional\s*use|variance|special\s*exception|"
+    r"comprehensive\s*plan|future\s*land|mixed.use|mixed\s*use|"
+    r"planned\s*dev|urban\s*village|growth\s*center|"
+    r"commercial\s*district|residential\s*district|industrial\s*district|"
+    r"overlay|corridor|sector|master\s*plan|concept\s*plan|"
+    r"infrastructure|right[\s\-]of[\s\-]way|dedication|abandonment|"
+    r"vacation|annexation|urban\s*renewal|redevelopment|infill|"
+    r"townhome|apartment|retail|office\s*park|warehouse|industrial\s*park"
+    r")\b",
     re.IGNORECASE,
 )
 
@@ -239,7 +251,7 @@ def lookup_comprehensive_plan(item_text: str, category: str = "") -> dict:
         "comp_plan_lookup_status":  "no_address",
     }
 
-    # Only run for relevant categories / keywords
+    # Always mark relevant items so the UI section appears even with no address
     is_relevant = (
         category in REAL_ESTATE_CATEGORIES
         or bool(REAL_ESTATE_KEYWORDS.search(item_text))
@@ -247,44 +259,61 @@ def lookup_comprehensive_plan(item_text: str, category: str = "") -> dict:
     if not is_relevant:
         return base
 
-    address = extract_address(item_text)
-    if not address:
-        return base
+    # Mark relevant — section will appear regardless of lookup outcome
+    base["comp_plan_relevant"] = True
 
-    base["comp_plan_address"] = address
-
-    coords = geocode(address)
-    if not coords:
-        base["comp_plan_lookup_status"] = "no_match"
-        return base
-
-    lon, lat = coords
-
-    # Build a map URL centred on the address (zoom ~16)
+    # Always include a general map link even if we can't pin the address
     base["comp_plan_map_url"] = (
         "https://cfw.maps.arcgis.com/apps/webappviewer/index.html"
-        f"?id=653d3a58efc848a1ad1e7516ee56c509"
-        f"&center={lon},{lat}&level=16"
+        "?id=653d3a58efc848a1ad1e7516ee56c509"
     )
 
-    lu = query_future_land_use(lon, lat)
-    if not lu:
-        base["comp_plan_lookup_status"] = "no_match"
-        return base
+    # Try every address candidate in the text (take first successful lookup)
+    addresses = _ADDR_RE.findall(item_text)
+    candidates = []
+    for m in _ADDR_RE.finditer(item_text):
+        raw = f"{m.group('number')} {m.group('street').strip()}, Fort Worth, TX"
+        candidates.append(re.sub(r"\s{2,}", " ", raw))
 
-    base.update({
-        "comp_plan_lu_code":        lu["lu_code"],
-        "comp_plan_lu_label":       lu["lu_label"],
-        "comp_plan_lu_description": lu["lu_description"],
-        "comp_plan_mu_category":    lu["mu_category"],
-        "comp_plan_lookup_status":  "found",
-    })
+    for address in candidates:
+        base["comp_plan_address"] = address
+
+        coords = geocode(address)
+        if not coords:
+            continue
+
+        lon, lat = coords
+
+        # Refine map URL to pin the geocoded location
+        base["comp_plan_map_url"] = (
+            "https://cfw.maps.arcgis.com/apps/webappviewer/index.html"
+            f"?id=653d3a58efc848a1ad1e7516ee56c509"
+            f"&center={lon},{lat}&level=16"
+        )
+
+        lu = query_future_land_use(lon, lat)
+        if lu:
+            base.update({
+                "comp_plan_lu_code":        lu["lu_code"],
+                "comp_plan_lu_label":       lu["lu_label"],
+                "comp_plan_lu_description": lu["lu_description"],
+                "comp_plan_mu_category":    lu["mu_category"],
+                "comp_plan_lookup_status":  "found",
+            })
+            return base
+
+    # Fell through all candidates without a match
+    if candidates:
+        base["comp_plan_lookup_status"] = "no_match"
+    # else stays "no_address" — but section still appears via comp_plan_relevant
     return base
 
 
 def is_real_estate_item(category: str, title: str, description: str) -> bool:
     """Return True if this item warrants a comprehensive plan lookup."""
-    if category in REAL_ESTATE_CATEGORIES:
-        return True
     combined = f"{title} {description}"
+    # Always include known land use categories
+    if category in REAL_ESTATE_CATEGORIES - {"Other"}:
+        return True
+    # For Other/unknown categories, require a keyword hit
     return bool(REAL_ESTATE_KEYWORDS.search(combined))

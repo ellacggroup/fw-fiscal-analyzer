@@ -192,7 +192,7 @@ export default function FiscalCard({ item }) {
           )}
 
           {/* ── Comprehensive Plan Land Use ── */}
-          {analysis.comp_plan_lu_code && (
+          {(analysis.comp_plan_relevant || analysis.comp_plan_lu_code || analysis.comp_plan_lookup_status) && (
             <CompPlanSection analysis={analysis} />
           )}
 
@@ -342,10 +342,15 @@ const LU_COLORS = {
 }
 
 function CompPlanSection({ analysis: a }) {
-  const colorClass = LU_COLORS[a.comp_plan_lu_code] || 'bg-gray-50 border-gray-300 text-gray-800'
+  const status = a.comp_plan_lookup_status
+  const found = status === 'found'
+  const colorClass = found
+    ? (LU_COLORS[a.comp_plan_lu_code] || 'bg-gray-50 border-gray-300 text-gray-800')
+    : 'bg-slate-50 border-slate-200 text-slate-700'
 
   return (
     <div className={`rounded-xl border-2 p-4 space-y-3 ${colorClass}`}>
+      {/* Header */}
       <div className="flex items-start justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-2">
           <Map className="w-4 h-4 flex-shrink-0 opacity-70" />
@@ -353,42 +358,68 @@ function CompPlanSection({ analysis: a }) {
             Comprehensive Plan — Future Land Use
           </h4>
         </div>
-        {a.comp_plan_map_url && (
-          <a
-            href={a.comp_plan_map_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1 text-xs font-semibold underline underline-offset-2 hover:opacity-80 transition-opacity flex-shrink-0"
-          >
-            View on map <ExternalLink className="w-3 h-3" />
-          </a>
-        )}
+        <a
+          href={a.comp_plan_map_url || 'https://cfw.maps.arcgis.com/apps/webappviewer/index.html?id=653d3a58efc848a1ad1e7516ee56c509'}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-1 text-xs font-semibold underline underline-offset-2 hover:opacity-80 transition-opacity flex-shrink-0"
+        >
+          View CFW comp plan map <ExternalLink className="w-3 h-3" />
+        </a>
       </div>
 
-      <div className="flex flex-wrap gap-3 items-start">
-        <div className="bg-white/70 rounded-lg border border-current/20 px-4 py-3 flex-shrink-0">
-          <p className="text-[10px] font-bold uppercase tracking-wider opacity-60 mb-0.5">Designated Use</p>
-          <p className="text-xl font-black">{a.comp_plan_lu_label}</p>
-          <p className="text-xs font-mono opacity-60 mt-0.5">{a.comp_plan_lu_code}</p>
+      {/* Designation — shown when lookup succeeded */}
+      {found && (
+        <div className="flex flex-wrap gap-3 items-start">
+          <div className="bg-white/70 rounded-lg border border-current/20 px-4 py-3 flex-shrink-0">
+            <p className="text-[10px] font-bold uppercase tracking-wider opacity-60 mb-0.5">Designated Use</p>
+            <p className="text-xl font-black">{a.comp_plan_lu_label}</p>
+            <p className="text-xs font-mono opacity-60 mt-0.5">{a.comp_plan_lu_code}</p>
+          </div>
+          <div className="flex-1 min-w-[180px]">
+            {a.comp_plan_lu_description && (
+              <p className="text-sm leading-relaxed opacity-90">{a.comp_plan_lu_description}</p>
+            )}
+            {a.comp_plan_mu_category && (
+              <p className="text-xs mt-1 opacity-70">
+                Mixed-use sub-category: <strong>{a.comp_plan_mu_category}</strong>
+              </p>
+            )}
+            {a.comp_plan_address && (
+              <p className="text-xs mt-2 flex items-start gap-1 opacity-60">
+                <MapPin className="w-3 h-3 flex-shrink-0 mt-0.5" />
+                {a.comp_plan_address}
+              </p>
+            )}
+          </div>
         </div>
+      )}
 
-        <div className="flex-1 min-w-[180px]">
-          {a.comp_plan_lu_description && (
-            <p className="text-sm leading-relaxed opacity-90">{a.comp_plan_lu_description}</p>
-          )}
-          {a.comp_plan_mu_category && (
-            <p className="text-xs mt-1 opacity-70">
-              Mixed-use sub-category: <strong>{a.comp_plan_mu_category}</strong>
-            </p>
-          )}
+      {/* No address extracted */}
+      {status === 'no_address' && (
+        <p className="text-sm text-slate-500 leading-relaxed">
+          No specific street address could be extracted from this item.
+          Use the map link above to look up the parcel manually.
+        </p>
+      )}
+
+      {/* Address found but geocode/layer returned no result */}
+      {status === 'no_match' && (
+        <div className="space-y-1">
+          <p className="text-sm text-slate-500 leading-relaxed">
+            Could not retrieve a comp plan designation for this address
+            {a.comp_plan_address ? ` (${a.comp_plan_address})` : ''}.
+            The parcel may be outside Fort Worth city limits, or the address
+            format wasn't recognized by the geocoder.
+          </p>
           {a.comp_plan_address && (
-            <p className="text-xs mt-2 flex items-start gap-1 opacity-60">
+            <p className="text-xs flex items-start gap-1 text-slate-400">
               <MapPin className="w-3 h-3 flex-shrink-0 mt-0.5" />
-              {a.comp_plan_address}
+              Attempted: {a.comp_plan_address}
             </p>
           )}
         </div>
-      </div>
+      )}
 
       <p className="text-[10px] opacity-50 leading-snug">
         Source: City of Fort Worth 2023 Adopted Comprehensive Plan — Future Land Use layer.
