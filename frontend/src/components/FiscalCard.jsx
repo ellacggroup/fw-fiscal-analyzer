@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronDown, ChevronUp, TrendingUp, TrendingDown, Minus, HelpCircle, AlertCircle, RefreshCw, Calendar, ArrowRight, MapPin, DollarSign, Briefcase } from 'lucide-react'
+import { ChevronDown, ChevronUp, TrendingUp, TrendingDown, Minus, HelpCircle, AlertCircle, RefreshCw, Calendar, ArrowRight, MapPin, DollarSign, Briefcase, Map, ExternalLink } from 'lucide-react'
 
 const RATING_CONFIG = {
   POSITIVE: {
@@ -191,6 +191,11 @@ export default function FiscalCard({ item }) {
             </div>
           )}
 
+          {/* ── Comprehensive Plan Land Use ── */}
+          {analysis.comp_plan_lu_code && (
+            <CompPlanSection analysis={analysis} />
+          )}
+
           {/* ── Site plan / plat two-tier analysis ── */}
           {analysis.site_plan_type && (
             <SitePlanDetail analysis={analysis} />
@@ -300,6 +305,95 @@ function DetailRow({ label, value, bold }) {
     <div className="flex justify-between text-sm gap-2">
       <span className="text-gray-500">{label}</span>
       <span className={`${bold ? 'font-semibold' : ''} text-gray-800 text-right`}>{value}</span>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Comprehensive Plan Land Use component
+// ---------------------------------------------------------------------------
+
+const LU_COLORS = {
+  // Residential
+  SF: 'bg-amber-50 border-amber-300 text-amber-900',
+  SUB: 'bg-amber-50 border-amber-300 text-amber-900',
+  RURAL: 'bg-amber-50 border-amber-300 text-amber-900',
+  LDR: 'bg-yellow-50 border-yellow-300 text-yellow-900',
+  MDR: 'bg-orange-50 border-orange-300 text-orange-900',
+  HDR: 'bg-orange-100 border-orange-400 text-orange-900',
+  UR: 'bg-orange-50 border-orange-300 text-orange-900',
+  MH: 'bg-amber-50 border-amber-300 text-amber-900',
+  // Commercial / Mixed
+  NC: 'bg-red-50 border-red-300 text-red-900',
+  GC: 'bg-red-100 border-red-400 text-red-900',
+  MU: 'bg-purple-50 border-purple-300 text-purple-900',
+  MUGC: 'bg-purple-100 border-purple-400 text-purple-900',
+  // Industrial
+  LI: 'bg-slate-50 border-slate-300 text-slate-900',
+  HI: 'bg-slate-100 border-slate-400 text-slate-900',
+  IGC: 'bg-slate-100 border-slate-400 text-slate-900',
+  // Civic / Open
+  INST: 'bg-blue-50 border-blue-300 text-blue-900',
+  INFRA: 'bg-gray-50 border-gray-300 text-gray-700',
+  PUBPK: 'bg-green-50 border-green-300 text-green-900',
+  PRIPK: 'bg-green-50 border-green-300 text-green-900',
+  AG: 'bg-lime-50 border-lime-300 text-lime-900',
+  WATER: 'bg-sky-50 border-sky-300 text-sky-900',
+}
+
+function CompPlanSection({ analysis: a }) {
+  const colorClass = LU_COLORS[a.comp_plan_lu_code] || 'bg-gray-50 border-gray-300 text-gray-800'
+
+  return (
+    <div className={`rounded-xl border-2 p-4 space-y-3 ${colorClass}`}>
+      <div className="flex items-start justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
+          <Map className="w-4 h-4 flex-shrink-0 opacity-70" />
+          <h4 className="text-sm font-bold uppercase tracking-wide opacity-80">
+            Comprehensive Plan — Future Land Use
+          </h4>
+        </div>
+        {a.comp_plan_map_url && (
+          <a
+            href={a.comp_plan_map_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1 text-xs font-semibold underline underline-offset-2 hover:opacity-80 transition-opacity flex-shrink-0"
+          >
+            View on map <ExternalLink className="w-3 h-3" />
+          </a>
+        )}
+      </div>
+
+      <div className="flex flex-wrap gap-3 items-start">
+        <div className="bg-white/70 rounded-lg border border-current/20 px-4 py-3 flex-shrink-0">
+          <p className="text-[10px] font-bold uppercase tracking-wider opacity-60 mb-0.5">Designated Use</p>
+          <p className="text-xl font-black">{a.comp_plan_lu_label}</p>
+          <p className="text-xs font-mono opacity-60 mt-0.5">{a.comp_plan_lu_code}</p>
+        </div>
+
+        <div className="flex-1 min-w-[180px]">
+          {a.comp_plan_lu_description && (
+            <p className="text-sm leading-relaxed opacity-90">{a.comp_plan_lu_description}</p>
+          )}
+          {a.comp_plan_mu_category && (
+            <p className="text-xs mt-1 opacity-70">
+              Mixed-use sub-category: <strong>{a.comp_plan_mu_category}</strong>
+            </p>
+          )}
+          {a.comp_plan_address && (
+            <p className="text-xs mt-2 flex items-start gap-1 opacity-60">
+              <MapPin className="w-3 h-3 flex-shrink-0 mt-0.5" />
+              {a.comp_plan_address}
+            </p>
+          )}
+        </div>
+      </div>
+
+      <p className="text-[10px] opacity-50 leading-snug">
+        Source: City of Fort Worth 2023 Adopted Comprehensive Plan — Future Land Use layer.
+        Designation reflects the long-range vision for this parcel, not current zoning.
+      </p>
     </div>
   )
 }
