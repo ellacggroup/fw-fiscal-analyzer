@@ -1,18 +1,19 @@
 """
 Fort Worth Comprehensive Plan – Future Land Use lookup.
 
-Given a free-text agenda item description, this module:
-  1. Extracts a street address using regex heuristics.
-  2. Geocodes the address via the ArcGIS World Geocoder (no key required).
-  3. Queries the FW Future Land Use MapServer layer to get the comp-plan
-     designation for that parcel.
+Extracts a location from agenda item text, geocodes it, then queries
+the FW Future Land Use MapServer layer for the comp-plan designation.
 
-Returns a dict that is safe to merge into an AgendaItem's analysis blob.
+Handles all Fort Worth ZC description patterns:
+  - Standard address:  "1234 Main Street"
+  - Block reference:   "5200 block of Oak Grove Road"
+  - Intersection:      "corner of Crowley Road and Altamesa Boulevard"
+  - Directional clue:  "north of I-20 at Bryant Irvin Road"
+  - Located-at phrase: "located at the southeast corner of ..."
 """
 
 import re
 import logging
-import urllib.parse
 from typing import Optional
 
 import httpx
@@ -33,12 +34,10 @@ FUTURE_LAND_USE_URL = (
     "/Planning_Development/Report_Flu_Published/MapServer/identify"
 )
 
-# Spatial reference: 4326 (WGS-84) for geocoder output; the MapServer
-# identify endpoint accepts geographic SR so we can pass 4326 directly.
-OUT_SR = 4326
+OUT_SR = 4326  # WGS-84
 
 # ---------------------------------------------------------------------------
-# Comprehensive plan LU code → human label mapping
+# Comp-plan LU code → label / description
 # ---------------------------------------------------------------------------
 
 LU_LABELS: dict[str, str] = {
@@ -65,7 +64,6 @@ LU_LABELS: dict[str, str] = {
     "WATER": "Lakes and Ponds",
 }
 
-# Descriptions used in the UI tooltip
 LU_DESCRIPTIONS: dict[str, str] = {
     "SF":    "Detached single-family homes, typically 2–4 units/acre.",
     "SUB":   "Suburban residential areas on larger lots.",
@@ -91,7 +89,7 @@ LU_DESCRIPTIONS: dict[str, str] = {
 }
 
 # ---------------------------------------------------------------------------
-# Categories / keywords that warrant a comp-plan lookup
+# Which items get the comp-plan lookup
 # ---------------------------------------------------------------------------
 
 REAL_ESTATE_CATEGORIES = {
@@ -99,58 +97,167 @@ REAL_ESTATE_CATEGORIES = {
     "Land / Real Estate",
     "Public Hearing",
     "Annexation",
-    "Other",  # catch-all — filter by keywords below
+    "Site Plan / Plat",
 }
 
 REAL_ESTATE_KEYWORDS = re.compile(
     r"\b("
     r"zon(ing)?|annex(ation)?|plat|subdivis|site\s*plan|replat|rezoning|"
     r"development|land\s*use|real\s*estate|property|parcel|acreage|"
-    r"lot|deed|convey|acqui|easement|right.of.way|"
-    r"ROW|PD[\s\-]?\d|ZC[\s\-]?\d|SP[\s\-]?\d|SUP[\s\-]?\d|"
-    r"specific\s*use|conditional\s*use|variance|special\s*exception|"
-    r"comprehensive\s*plan|future\s*land|mixed.use|mixed\s*use|"
+    r"easement|right.of.way|"
+    r"ZC[\s\-]?\d|SP[\s\-]?\d|SUP[\s\-]?\d|PD[\s\-]?\d|"
+    r"specific\s*use|conditional\s*use|variance|"
     r"planned\s*dev|urban\s*village|growth\s*center|"
-    r"commercial\s*district|residential\s*district|industrial\s*district|"
-    r"overlay|corridor|sector|master\s*plan|concept\s*plan|"
-    r"infrastructure|right[\s\-]of[\s\-]way|dedication|abandonment|"
-    r"vacation|annexation|urban\s*renewal|redevelopment|infill|"
-    r"townhome|apartment|retail|office\s*park|warehouse|industrial\s*park"
+    r"overlay|corridor|concept\s*plan|"
+    r"townhome|apartment|retail|warehouse|industrial\s*park"
     r")\b",
     re.IGNORECASE,
 )
 
 # ---------------------------------------------------------------------------
-# Address extraction
+# Street-suffix vocabulary (for all regex patterns below)
 # ---------------------------------------------------------------------------
 
-# Matches patterns like:
-#   "123 Main St", "4500 N. Hulen Street", "8200 Camp Bowie West Blvd",
-#   "located at 100 E. Weatherford", "property at 3001 W Loop 820"
-_ADDR_RE = re.compile(
-    r"(?:(?:located|situated|property|address|site)\s+at\s+)?"
-    r"(?<!\d)(?<!-)(?P<number>\d{3,6})\s+"
-    r"(?P<street>"
-    r"(?:[NSEW]\.?\s+)?"
-    r"[A-Z][A-Za-z0-9\.\s\-]+?"
+_SUFFIX = (
     r"(?:Street|St|Avenue|Ave|Boulevard|Blvd|Road|Rd|Drive|Dr|"
     r"Lane|Ln|Court|Ct|Place|Pl|Way|Trail|Trl|Pkwy|Parkway|"
     r"Loop|Freeway|Fwy|Highway|Hwy|Circle|Cir|Terrace|Ter|"
-    r"Row|Run|Path|Pass|Pike|Point|Pt|Bend|Crossing|Cove|"
-    r"Commons|Landing|Ridge|Creek|North|South|East|West)"
-    r"(?:\s+(?:North|South|East|West|NE|NW|SE|SW|Suite|Ste|#\s*\d+))?)",
+    r"Run|Path|Pass|Pike|Point|Pt|Bend|Crossing|Cove|"
+    r"Commons|Landing|Ridge|Creek|Row|Expressway|Expy|"
+    r"North|South|East|West)"
+)
+
+_DIR = r"(?:[NSEW]\.?\s+|North\s+|South\s+|East\s+|West\s+|NE\s+|NW\s+|SE\s+|SW\s+)?"
+
+# ---------------------------------------------------------------------------
+# Pattern 1: standard numbered address
+#   "1234 Main St", "4500 N. Hulen Street", "12400 W Cleburne Road"
+# ---------------------------------------------------------------------------
+_P_NUMBERED = re.compile(
+    r"(?<!\d)(?<!-)(\d{3,6})\s+"
+    r"(" + _DIR + r"[A-Za-z][A-Za-z0-9\.\s\-]{1,40}?" + _SUFFIX + r")",
     re.IGNORECASE,
 )
 
+# ---------------------------------------------------------------------------
+# Pattern 2: "X block of <Street Name>"
+#   "5200 block of Oak Grove Road", "the 4000 block of Camp Bowie"
+# ---------------------------------------------------------------------------
+_P_BLOCK = re.compile(
+    r"(?<!\d)(\d{3,6})\s+block\s+of\s+"
+    r"(" + _DIR + r"[A-Za-z][A-Za-z0-9\.\s\-]{1,40}?" + _SUFFIX + r")",
+    re.IGNORECASE,
+)
 
-def extract_address(text: str) -> Optional[str]:
-    """Return the first plausible Fort Worth street address found in text."""
-    m = _ADDR_RE.search(text)
-    if not m:
-        return None
-    addr = f"{m.group('number')} {m.group('street').strip()}, Fort Worth, TX"
-    # Clean up multiple spaces
-    return re.sub(r"\s{2,}", " ", addr)
+# ---------------------------------------------------------------------------
+# Pattern 3: intersection  "X Road and Y Boulevard"
+#   Triggered by "corner of", "intersection of", "at X and Y"
+# ---------------------------------------------------------------------------
+_P_INTERSECTION = re.compile(
+    r"(?:corner\s+of|intersection\s+of|at\s+the\s+(?:\w+\s+)?corner\s+of)"
+    r"\s+"
+    r"(" + _DIR + r"[A-Za-z][A-Za-z0-9\.\s\-]{1,40}?" + _SUFFIX + r")"
+    r"\s+and\s+"
+    r"(" + _DIR + r"[A-Za-z][A-Za-z0-9\.\s\-]{1,40}?" + _SUFFIX + r")",
+    re.IGNORECASE,
+)
+
+# Simpler "X Street and Y Road" without a corner/intersection prefix
+_P_AND_STREETS = re.compile(
+    r"(" + _DIR + r"[A-Za-z][A-Za-z0-9\.\s\-]{1,40}?" + _SUFFIX + r")"
+    r"\s+and\s+"
+    r"(" + _DIR + r"[A-Za-z][A-Za-z0-9\.\s\-]{1,40}?" + _SUFFIX + r")"
+    r"(?:\s+in\s+Fort\s+Worth)?",
+    re.IGNORECASE,
+)
+
+# ---------------------------------------------------------------------------
+# Pattern 4: "located at/near/on <Street>"  (single street, no number)
+#   "located on Berry Street", "property on Hulen"
+# ---------------------------------------------------------------------------
+_P_LOCATED_ON = re.compile(
+    r"(?:located|situated|property|site|parcel)\s+(?:at|on|near|along)\s+"
+    r"(?:the\s+)?"
+    r"(" + _DIR + r"[A-Za-z][A-Za-z0-9\.\s\-]{1,40}?" + _SUFFIX + r")",
+    re.IGNORECASE,
+)
+
+# ---------------------------------------------------------------------------
+# Helper: clean extracted text
+# ---------------------------------------------------------------------------
+
+def _clean(s: str) -> str:
+    return re.sub(r"\s{2,}", " ", s).strip().rstrip(".,;")
+
+
+def _fw(addr: str) -> str:
+    """Append ', Fort Worth, TX' if not already present."""
+    if "Fort Worth" not in addr:
+        return f"{addr}, Fort Worth, TX"
+    return addr
+
+
+# ---------------------------------------------------------------------------
+# Extract all candidate geocode strings from item text
+# ---------------------------------------------------------------------------
+
+def extract_location_candidates(text: str) -> list[str]:
+    """
+    Return a list of geocodable location strings from *text*, ordered from
+    most to least specific.  Deduplicated, preserving order.
+    """
+    seen: set[str] = set()
+    results: list[str] = []
+
+    def add(s: str) -> None:
+        s = _fw(_clean(s))
+        # Drop strings that are too short or contain leading garbage
+        core = s.replace(", Fort Worth, TX", "").strip()
+        if len(core) < 6:
+            return
+        # Drop if it starts mid-word (artifact of partial regex match)
+        if re.match(r"^[a-z]", core):
+            return
+        if s not in seen:
+            seen.add(s)
+            results.append(s)
+
+    # 1. Standard numbered addresses (most specific — try first)
+    for m in _P_NUMBERED.finditer(text):
+        num = m.group(1)
+        street = _clean(m.group(2))
+        # Skip if the number is part of a case reference like ZC-24-015
+        pre = text[max(0, m.start()-5):m.start()]
+        if re.search(r"[\-\.]$", pre.rstrip()):
+            continue
+        add(f"{num} {street}")
+
+    # 2. Block references  →  use block number as the street number
+    for m in _P_BLOCK.finditer(text):
+        num = m.group(1)
+        street = _clean(m.group(2))
+        add(f"{num} {street}")
+
+    # 3. Explicit intersections  →  "Street1 & Street2, Fort Worth, TX"
+    for m in _P_INTERSECTION.finditer(text):
+        s1 = _clean(m.group(1))
+        s2 = _clean(m.group(2))
+        add(f"{s1} & {s2}")
+
+    # 4. "and" between two named streets (less reliable — add last)
+    for m in _P_AND_STREETS.finditer(text):
+        s1 = _clean(m.group(1))
+        s2 = _clean(m.group(2))
+        # Skip if too short or looks like a zone code
+        if len(s1) < 5 or len(s2) < 5:
+            continue
+        add(f"{s1} & {s2}")
+
+    # 5. Single street from "located at/on" phrase
+    for m in _P_LOCATED_ON.finditer(text):
+        add(_clean(m.group(1)))
+
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -158,7 +265,7 @@ def extract_address(text: str) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 def geocode(address: str) -> Optional[tuple[float, float]]:
-    """Return (longitude, latitude) for *address* or None on failure."""
+    """Return (longitude, latitude) or None.  Requires score ≥ 65."""
     params = {
         "SingleLine": address,
         "outFields": "Match_addr,Score",
@@ -166,14 +273,20 @@ def geocode(address: str) -> Optional[tuple[float, float]]:
         "f": "json",
         "outSR": str(OUT_SR),
         "countryCode": "USA",
+        "location": "-97.3308,32.7555",   # Fort Worth centre — boosts local matches
+        "distance": "50000",               # 50 km search radius
     }
     try:
-        r = httpx.get(GEOCODE_URL, params=params, timeout=8)
+        r = httpx.get(GEOCODE_URL, params=params, timeout=10)
         r.raise_for_status()
         candidates = r.json().get("candidates", [])
-        if not candidates or candidates[0].get("score", 0) < 70:
+        if not candidates:
             return None
-        loc = candidates[0]["location"]
+        best = candidates[0]
+        if best.get("score", 0) < 65:
+            logger.debug("Low geocode score %s for %r", best.get("score"), address)
+            return None
+        loc = best["location"]
         return loc["x"], loc["y"]
     except Exception as exc:
         logger.warning("Geocode failed for %r: %s", address, exc)
@@ -185,42 +298,37 @@ def geocode(address: str) -> Optional[tuple[float, float]]:
 # ---------------------------------------------------------------------------
 
 def query_future_land_use(lon: float, lat: float) -> Optional[dict]:
-    """
-    Identify the Future Land Use polygon at (lon, lat).
-    Returns a dict with keys: lu_code, lu_label, lu_description, mu_category.
-    """
+    """Query the FW Future Land Use MapServer layer at (lon, lat)."""
     params = {
         "geometry": f"{lon},{lat}",
         "geometryType": "esriGeometryPoint",
         "sr": str(OUT_SR),
-        "layers": "all:6",          # layer index 6 — Future Land Use
-        "tolerance": "5",
-        "mapExtent": f"{lon-0.001},{lat-0.001},{lon+0.001},{lat+0.001}",
+        "layers": "all:6",
+        "tolerance": "10",
+        "mapExtent": f"{lon-0.002},{lat-0.002},{lon+0.002},{lat+0.002}",
         "imageDisplay": "800,600,96",
         "returnGeometry": "false",
         "f": "json",
     }
     try:
-        r = httpx.get(FUTURE_LAND_USE_URL, params=params, timeout=10)
+        r = httpx.get(FUTURE_LAND_USE_URL, params=params, timeout=12)
         r.raise_for_status()
         results = r.json().get("results", [])
         if not results:
             return None
         attrs = results[0].get("attributes", {})
-        lu_code = attrs.get("LU") or attrs.get("lu") or ""
+        lu_code = (attrs.get("LU") or attrs.get("lu") or "").strip().upper()
         mu_cat  = attrs.get("MU_Category") or attrs.get("MU_CATEGORY") or ""
         if not lu_code:
             return None
-        label = LU_LABELS.get(lu_code.upper(), lu_code)
-        desc  = LU_DESCRIPTIONS.get(lu_code.upper(), "")
         return {
-            "lu_code":        lu_code.upper(),
-            "lu_label":       label,
-            "lu_description": desc,
+            "lu_code":        lu_code,
+            "lu_label":       LU_LABELS.get(lu_code, lu_code),
+            "lu_description": LU_DESCRIPTIONS.get(lu_code, ""),
             "mu_category":    mu_cat or None,
         }
     except Exception as exc:
-        logger.warning("Future land use query failed at (%s,%s): %s", lon, lat, exc)
+        logger.warning("FLU query failed at (%.5f, %.5f): %s", lon, lat, exc)
         return None
 
 
@@ -230,28 +338,24 @@ def query_future_land_use(lon: float, lat: float) -> Optional[dict]:
 
 def lookup_comprehensive_plan(item_text: str, category: str = "") -> dict:
     """
-    Main entry point.  Given agenda item text and its category label,
-    returns a dict to merge into the analysis blob:
-
-      comp_plan_address        – address that was looked up (or None)
-      comp_plan_lu_code        – e.g. "GC"
-      comp_plan_lu_label       – e.g. "General Commercial"
-      comp_plan_lu_description – one-sentence description
-      comp_plan_mu_category    – mixed-use sub-category if applicable
-      comp_plan_map_url        – direct link to CFW map centred on address
-      comp_plan_lookup_status  – "found" | "no_address" | "no_match" | "error"
+    Returns a dict of comp_plan_* fields to merge into the analysis blob.
+    Always sets comp_plan_relevant=True for qualifying items so the UI
+    section renders even when the GIS lookup cannot find a match.
     """
     base: dict = {
+        "comp_plan_relevant":       False,
         "comp_plan_address":        None,
         "comp_plan_lu_code":        None,
         "comp_plan_lu_label":       None,
         "comp_plan_lu_description": None,
         "comp_plan_mu_category":    None,
-        "comp_plan_map_url":        None,
+        "comp_plan_map_url":        (
+            "https://cfw.maps.arcgis.com/apps/webappviewer/index.html"
+            "?id=653d3a58efc848a1ad1e7516ee56c509"
+        ),
         "comp_plan_lookup_status":  "no_address",
     }
 
-    # Always mark relevant items so the UI section appears even with no address
     is_relevant = (
         category in REAL_ESTATE_CATEGORIES
         or bool(REAL_ESTATE_KEYWORDS.search(item_text))
@@ -259,36 +363,24 @@ def lookup_comprehensive_plan(item_text: str, category: str = "") -> dict:
     if not is_relevant:
         return base
 
-    # Mark relevant — section will appear regardless of lookup outcome
     base["comp_plan_relevant"] = True
 
-    # Always include a general map link even if we can't pin the address
-    base["comp_plan_map_url"] = (
-        "https://cfw.maps.arcgis.com/apps/webappviewer/index.html"
-        "?id=653d3a58efc848a1ad1e7516ee56c509"
-    )
+    candidates = extract_location_candidates(item_text)
+    if not candidates:
+        return base   # stays "no_address"
 
-    # Try every address candidate in the text (take first successful lookup)
-    addresses = _ADDR_RE.findall(item_text)
-    candidates = []
-    for m in _ADDR_RE.finditer(item_text):
-        raw = f"{m.group('number')} {m.group('street').strip()}, Fort Worth, TX"
-        candidates.append(re.sub(r"\s{2,}", " ", raw))
-
+    tried: list[str] = []
     for address in candidates:
-        base["comp_plan_address"] = address
-
+        tried.append(address)
         coords = geocode(address)
         if not coords:
             continue
 
         lon, lat = coords
-
-        # Refine map URL to pin the geocoded location
+        base["comp_plan_address"] = address
         base["comp_plan_map_url"] = (
             "https://cfw.maps.arcgis.com/apps/webappviewer/index.html"
-            f"?id=653d3a58efc848a1ad1e7516ee56c509"
-            f"&center={lon},{lat}&level=16"
+            f"?id=653d3a58efc848a1ad1e7516ee56c509&center={lon},{lat}&level=16"
         )
 
         lu = query_future_land_use(lon, lat)
@@ -302,18 +394,13 @@ def lookup_comprehensive_plan(item_text: str, category: str = "") -> dict:
             })
             return base
 
-    # Fell through all candidates without a match
-    if candidates:
-        base["comp_plan_lookup_status"] = "no_match"
-    # else stays "no_address" — but section still appears via comp_plan_relevant
+    # Tried at least one address but nothing matched
+    base["comp_plan_address"] = tried[0] if tried else None
+    base["comp_plan_lookup_status"] = "no_match"
     return base
 
 
 def is_real_estate_item(category: str, title: str, description: str) -> bool:
-    """Return True if this item warrants a comprehensive plan lookup."""
-    combined = f"{title} {description}"
-    # Always include known land use categories
-    if category in REAL_ESTATE_CATEGORIES - {"Other"}:
+    if category in REAL_ESTATE_CATEGORIES:
         return True
-    # For Other/unknown categories, require a keyword hit
-    return bool(REAL_ESTATE_KEYWORDS.search(combined))
+    return bool(REAL_ESTATE_KEYWORDS.search(f"{title} {description}"))

@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { FileText, Clock, RefreshCw } from 'lucide-react'
-import { reanalyzeAgenda } from '../services/api'
+import { FileText, Clock, RefreshCw, Layers } from 'lucide-react'
+import { reanalyzeAgenda, reanalyzeAll } from '../services/api'
 
 export default function HistorySidebar({ agendas, currentId, onSelect, onReanalyzed }) {
   const [reanalyzing, setReanalyzing] = useState(null)
+  const [reanalyzingAll, setReanalyzingAll] = useState(false)
 
   if (!agendas.length) return null
 
@@ -20,11 +21,35 @@ export default function HistorySidebar({ agendas, currentId, onSelect, onReanaly
     }
   }
 
+  async function handleReanalyzeAll() {
+    if (!window.confirm(`Reanalyze all ${agendas.length} agendas? This will refresh the Comprehensive Plan lookup for every zoning item. May take a few minutes.`)) return
+    setReanalyzingAll(true)
+    try {
+      await reanalyzeAll()
+      window.location.reload()
+    } catch (err) {
+      alert('Reanalyze all failed: ' + (err.response?.data?.detail || err.message))
+    } finally {
+      setReanalyzingAll(false)
+    }
+  }
+
   return (
     <aside className="w-64 flex-shrink-0">
-      <h2 className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-3">
-        Upload History
-      </h2>
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-xs font-bold uppercase tracking-wider text-gray-500">
+          Upload History
+        </h2>
+        <button
+          onClick={handleReanalyzeAll}
+          disabled={reanalyzingAll}
+          title="Refresh Comprehensive Plan data for all agendas"
+          className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 disabled:opacity-40 font-semibold"
+        >
+          <Layers className={`w-3.5 h-3.5 ${reanalyzingAll ? 'animate-pulse' : ''}`} />
+          {reanalyzingAll ? 'Updating…' : 'Refresh All'}
+        </button>
+      </div>
       <div className="space-y-2">
         {agendas.map((a) => (
           <div
