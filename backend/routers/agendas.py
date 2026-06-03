@@ -407,14 +407,18 @@ def _enrich_with_gis(merged: dict, item_data: dict, cat: str) -> None:
             if not gis:
                 continue
             if gis.get("zoning_from") or gis.get("zoning_to"):
-                merged["zoning_from_code"]    = gis["zoning_from"]
-                merged["zoning_to_code"]      = gis["zoning_to"]
-                merged["zoning_from_label"]   = gis["zoning_from"]
-                merged["zoning_to_label"]     = gis["zoning_to"]
-                merged["zoning_from_desc"]    = ""
-                merged["zoning_to_desc"]      = gis["zoning_to"]
-                merged["zoning_request_parsed"] = True
-                merged["zoning_gis_source"]   = True
+                merged["zoning_from_code"]           = gis["zoning_from"]
+                merged["zoning_to_code"]             = gis["zoning_to"]
+                merged["zoning_from_label"]          = gis["zoning_from"]
+                merged["zoning_to_label"]            = gis["zoning_to"]
+                merged["zoning_from_desc"]           = ""
+                merged["zoning_to_desc"]             = gis["zoning_to"]
+                merged["zoning_request_parsed"]      = True
+                merged["zoning_gis_source"]          = True
+                merged["zoning_case_number"]         = gis["case_number"]
+                merged["zoning_applicant"]           = gis.get("applicant", "")
+                merged["zoning_action"]              = gis.get("action", "")
+                merged["consistent_with_comp_plan"]  = gis.get("consistent_with_comp_plan", "")
                 if gis.get("acres") and not merged.get("acreage_estimate"):
                     merged["acreage_estimate"] = gis["acres"]
                 if gis.get("address") and not merged.get("comp_plan_address"):

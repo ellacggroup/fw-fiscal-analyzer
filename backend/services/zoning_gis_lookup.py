@@ -28,7 +28,7 @@ ZONING_MAPSERVER = (
 # Layers to try, in order (most recent first)
 CASE_LAYERS = [3, 196, 195, 91, 85, 68]
 
-FIELDS = "CASE_NMBR,ZONING_FRO,ZONING_TO,ADDRESS,ACRES,FUTURE_LAN,ACTION_,APPLT_NAME"
+FIELDS = "CASE_NMBR,ZONING_FRO,ZONING_TO,ADDRESS,ACRES,FUTURE_LAN,ACTION_,APPLT_NAME,CONSISTENC"
 
 # Regex to find ZC / SUP / BOA case numbers in agenda text
 _CASE_RE = re.compile(
@@ -83,15 +83,17 @@ def lookup_zoning_case(case_number: str) -> Optional[dict]:
     for layer_id in CASE_LAYERS:
         attrs = _query_layer(layer_id, case_number)
         if attrs:
+            consistenc = (attrs.get("CONSISTENC") or "").strip()
             return {
-                "case_number":          case_number,
-                "zoning_from":          (attrs.get("ZONING_FRO") or "").strip(),
-                "zoning_to":            (attrs.get("ZONING_TO") or "").strip(),
-                "address":              (attrs.get("ADDRESS") or "").strip(),
-                "acres":                attrs.get("ACRES"),
-                "future_land_use_code": (attrs.get("FUTURE_LAN") or "").strip().upper(),
-                "applicant":            (attrs.get("APPLT_NAME") or "").strip(),
-                "action":               (attrs.get("ACTION_") or "").strip(),
+                "case_number":              case_number,
+                "zoning_from":              (attrs.get("ZONING_FRO") or "").strip(),
+                "zoning_to":                (attrs.get("ZONING_TO") or "").strip(),
+                "address":                  (attrs.get("ADDRESS") or "").strip(),
+                "acres":                    attrs.get("ACRES"),
+                "future_land_use_code":     (attrs.get("FUTURE_LAN") or "").strip().upper(),
+                "applicant":                (attrs.get("APPLT_NAME") or "").strip(),
+                "action":                   (attrs.get("ACTION_") or "").strip(),
+                "consistent_with_comp_plan": consistenc,  # "Yes" | "No" | ""
             }
     return None
 

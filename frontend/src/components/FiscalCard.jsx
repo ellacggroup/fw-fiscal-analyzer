@@ -1,5 +1,78 @@
 import { useState } from 'react'
-import { ChevronDown, ChevronUp, TrendingUp, TrendingDown, Minus, HelpCircle, AlertCircle, RefreshCw, Calendar, ArrowRight, MapPin, DollarSign, Briefcase, Map, ExternalLink } from 'lucide-react'
+import { ChevronDown, ChevronUp, TrendingUp, TrendingDown, Minus, HelpCircle, AlertCircle, RefreshCw, Calendar, ArrowRight, MapPin, DollarSign, Briefcase, Map, ExternalLink, CheckCircle, XCircle, Info } from 'lucide-react'
+
+// ---------------------------------------------------------------------------
+// Fort Worth zone code → plain-English description of what is allowed
+// ---------------------------------------------------------------------------
+const FW_ZONE_DESCRIPTIONS = {
+  'A-5':   { label: 'One-Family Residential', allows: 'Detached single-family homes on lots of 5,000 sq ft or more. No commercial uses permitted.' },
+  'A-10':  { label: 'One-Family Residential', allows: 'Detached single-family homes on larger lots (10,000 sq ft min). Rural-suburban character.' },
+  'A-21':  { label: 'One-Family Residential', allows: 'Very low-density single-family on 21,000 sq ft lots. Large-lot suburban or semi-rural development.' },
+  'A-43':  { label: 'One-Family Residential', allows: 'Estate-lot residential, roughly 1 acre per home. Low density, semi-rural character.' },
+  'AG':    { label: 'Agricultural', allows: 'Farming, ranching, and very low-density residential. Essentially undeveloped land.' },
+  'AN':    { label: 'Agricultural/Natural', allows: 'Agricultural uses and natural open space. Minimal development intended.' },
+  'AR':    { label: 'Agricultural Residential', allows: 'Single-family homes in a rural/agricultural setting. Limited to very low density.' },
+  'B':     { label: 'Two-Family Residential', allows: 'Duplexes and two-unit residential structures. No apartments or commercial uses.' },
+  'C':     { label: 'Low-Rise Multifamily', allows: 'Apartments and condos up to 3 stories. Higher density than single-family zones.' },
+  'D':     { label: 'High-Density Multifamily', allows: 'Mid- and high-rise apartment buildings. Urban density residential.' },
+  'D-HR':  { label: 'High-Rise Multifamily', allows: 'High-rise residential towers. Maximum residential density.' },
+  'E':     { label: 'Neighborhood Commercial', allows: 'Small-scale retail, restaurants, offices, and personal services. Intended to serve nearby neighborhoods.' },
+  'ER':    { label: 'Neighborhood Commercial Restricted', allows: 'Limited neighborhood commercial uses with restrictions on hours, size, and type.' },
+  'F':     { label: 'General Commercial', allows: 'Full range of retail, restaurants, auto-related uses, offices, hotels. No heavy industrial.' },
+  'G':     { label: 'Intensive Commercial', allows: 'High-intensity commercial including auto sales, drive-throughs, outdoor storage. Freeway-oriented uses.' },
+  'H':     { label: 'Central Business District', allows: 'Dense urban mix of office, retail, residential, and civic uses. Downtown Fort Worth.' },
+  'I':     { label: 'Light Industrial', allows: 'Light manufacturing, warehousing, distribution, flex space. Limited outdoor storage.' },
+  'J':     { label: 'Medium Industrial', allows: 'General manufacturing and industrial uses. More intensive than Light Industrial.' },
+  'K':     { label: 'Heavy Industrial', allows: 'Heavy manufacturing, processing plants, large outdoor storage, freight terminals.' },
+  'CF':    { label: 'Community Facilities', allows: 'Schools, churches, parks, government buildings, hospitals. Civic/institutional uses only.' },
+  'NS':    { label: 'Neighborhood Service', allows: 'Small-scale neighborhood-serving commercial and office uses.' },
+  'GR':    { label: 'General Residential', allows: 'Mix of single-family and low-density multifamily. Transitional residential zone.' },
+  'UR':    { label: 'Urban Residential', allows: 'Medium-density urban housing: townhomes, rowhouses, small apartments. Walkable areas.' },
+  'MU-1':  { label: 'Low-Intensity Mixed-Use', allows: 'Ground-floor retail/office with upper-floor residential. Pedestrian-scaled, neighborhood-serving.' },
+  'MU-2':  { label: 'High-Intensity Mixed-Use', allows: 'Dense vertical mixed-use development: larger retail, office towers, mid/high-rise residential.' },
+  'MU':    { label: 'Mixed-Use', allows: 'Combination of residential, retail, and office uses, either vertically or horizontally integrated.' },
+  'O-1':   { label: 'Floodplain/Open Space', allows: 'No permanent structures. Protects floodplain and natural areas from development.' },
+  'PD':    { label: 'Planned Development', allows: 'Custom zoning negotiated between the applicant and city. Uses, density, and design standards are set in the PD ordinance.' },
+  'PI-UL-2': { label: 'Panther Island Urban District', allows: 'High-density urban mixed-use on the Panther Island development area.' },
+}
+
+function getZoneInfo(code) {
+  if (!code) return null
+  const clean = code.trim().toUpperCase()
+  // Exact match
+  if (FW_ZONE_DESCRIPTIONS[clean]) return FW_ZONE_DESCRIPTIONS[clean]
+  // Base code before slash (e.g. A-5/HC → A-5)
+  const base = clean.split('/')[0]
+  if (FW_ZONE_DESCRIPTIONS[base]) return FW_ZONE_DESCRIPTIONS[base]
+  // PD family
+  if (clean.startsWith('PD')) return FW_ZONE_DESCRIPTIONS['PD']
+  return null
+}
+
+// Comp plan code → what it means for this area long-term
+const COMP_PLAN_CONTEXT = {
+  SF:    'The Comprehensive Plan envisions this area as stable low-density single-family residential. The city aims to preserve its neighborhood character and avoid intensive commercial or multifamily encroachment.',
+  SUB:   'The Comprehensive Plan designates this as Suburban Residential — low-density housing on larger lots at the suburban edge of the city.',
+  RURAL: 'The Comprehensive Plan designates this as Rural Residential — very low-density development preserving a rural character.',
+  LDR:   'The Comprehensive Plan envisions low-density residential development here, including single-family and small-scale attached housing.',
+  MDR:   'The Comprehensive Plan calls for medium-density residential development — townhomes, duplexes, or small apartment buildings.',
+  HDR:   'The Comprehensive Plan designates this for high-density residential — apartment complexes and urban housing.',
+  UR:    'The Comprehensive Plan designates this as Urban Residential — a mix of housing types in a walkable, urban setting.',
+  MH:    'The Comprehensive Plan designates this area for manufactured housing communities.',
+  NC:    'The Comprehensive Plan envisions small-scale neighborhood-serving commercial uses — shops, services, and offices that serve nearby residents without generating regional traffic.',
+  GC:    'The Comprehensive Plan designates this as General Commercial — a full range of retail, office, dining, and auto-related commercial uses, typically along major corridors.',
+  MU:    'The Comprehensive Plan calls for Mixed-Use development — a blend of housing, retail, and office uses that creates walkable, livable urban environments.',
+  MUGC:  'The Comprehensive Plan designates this as a Mixed-Use Growth Center — a priority location for intensive, transit-friendly mixed-use development.',
+  LI:    'The Comprehensive Plan designates this for Light Industrial uses — warehousing, distribution, flex-industrial, and light manufacturing.',
+  HI:    'The Comprehensive Plan designates this for Heavy Industrial uses — manufacturing, processing, and freight-intensive operations.',
+  IGC:   'The Comprehensive Plan designates this as an Industrial Growth Center — a priority area for large-scale industrial and employment-generating development.',
+  INST:  'The Comprehensive Plan designates this area for Institutional uses — schools, hospitals, government facilities, or places of worship.',
+  INFRA: 'The Comprehensive Plan designates this area for Infrastructure — utilities, transportation corridors, and public works facilities.',
+  PUBPK: 'The Comprehensive Plan designates this as existing public parkland to be preserved and maintained as open space.',
+  PRIPK: 'The Comprehensive Plan designates this as private open space or greenway — development should be avoided.',
+  AG:    'The Comprehensive Plan designates this as Agricultural/Vacant — land that is expected to remain undeveloped or transition gradually to other uses over time.',
+  WATER: 'The Comprehensive Plan designates this as Lakes and Ponds — water body to be preserved.',
+}
 
 const RATING_CONFIG = {
   POSITIVE: {
@@ -596,8 +669,14 @@ function ZoningDetail({ analysis: a, item }) {
   const scenarios = a.by_right_scenarios || []
   const statedFiscal = a.stated_use_fiscal
   const isPdAmend = a.zoning_from_code === a.zoning_to_code && a.zoning_from_code?.startsWith('PD')
+  const consistent = a.consistent_with_comp_plan
+  const compLuCode = a.comp_plan_lu_code
+  const compLuLabel = a.comp_plan_lu_label
+  const compContext = COMP_PLAN_CONTEXT[compLuCode] || null
+  const fromInfo = getZoneInfo(a.zoning_from_code)
+  const toInfo = getZoneInfo(a.zoning_to_code)
 
-  // Fallback: item is a zoning change but specific codes couldn't be parsed
+  // Fallback: zoning change but codes not yet loaded — prompt reanalysis
   if (!a.zoning_request_parsed) {
     return (
       <div className="rounded-xl border-2 border-indigo-200 bg-indigo-50 p-4 space-y-3">
@@ -605,17 +684,12 @@ function ZoningDetail({ analysis: a, item }) {
           Zoning Request Detail
         </h4>
         <p className="text-sm text-indigo-700 leading-relaxed">
-          This is a zoning change request. The specific From/To zoning codes could not be
-          automatically extracted from the agenda text — the description may use an
-          non-standard format or the codes are embedded in the staff report.
-        </p>
-        <p className="text-sm text-indigo-700 leading-relaxed">
-          <strong>To see the full zoning detail:</strong> click <em>Reanalyze</em> in the
-          sidebar after today's deploy completes, or review the M&amp;C staff report for
-          the current and proposed zoning designations.
+          This is a zoning change. Click <strong>Reanalyze</strong> in the sidebar to load
+          the From/To zoning codes, comprehensive plan alignment, and full detail from
+          Fort Worth's GIS system.
         </p>
         {a.revenue_explanation && (
-          <div className="flex items-start gap-2">
+          <div className="flex items-start gap-2 bg-white/60 rounded-lg p-3 border border-indigo-100">
             <DollarSign className="w-4 h-4 text-indigo-400 flex-shrink-0 mt-0.5" />
             <p className="text-sm text-gray-700 leading-relaxed">{a.revenue_explanation}</p>
           </div>
@@ -626,36 +700,107 @@ function ZoningDetail({ analysis: a, item }) {
 
   return (
     <div className="rounded-xl border-2 border-indigo-200 bg-indigo-50 p-4 space-y-5">
-      <h4 className="text-sm font-bold text-indigo-900 uppercase tracking-wide">
-        {isPdAmend ? 'PD Amendment Detail' : 'Zoning Request Detail'}
-      </h4>
+
+      {/* Title row */}
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h4 className="text-sm font-bold text-indigo-900 uppercase tracking-wide">
+          {isPdAmend ? 'PD Amendment Detail' : 'Zoning Request Detail'}
+        </h4>
+        {a.zoning_case_number && (
+          <span className="text-xs font-mono bg-indigo-100 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded">
+            {a.zoning_case_number}
+          </span>
+        )}
+      </div>
+
+      {/* Consistency with Comprehensive Plan — always shown for zoning items */}
+      {(consistent || compLuLabel) && (
+        <div className={`rounded-lg border-2 p-3 flex items-start gap-3 ${
+          consistent === 'Yes'
+            ? 'bg-green-50 border-green-300'
+            : consistent === 'No'
+              ? 'bg-red-50 border-red-300'
+              : 'bg-blue-50 border-blue-200'
+        }`}>
+          {consistent === 'Yes'
+            ? <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+            : consistent === 'No'
+              ? <XCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+              : <Info className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />}
+          <div className="space-y-1">
+            <p className={`text-sm font-bold ${
+              consistent === 'Yes' ? 'text-green-800' : consistent === 'No' ? 'text-red-800' : 'text-blue-800'
+            }`}>
+              {consistent === 'Yes'
+                ? 'Consistent with the Comprehensive Plan'
+                : consistent === 'No'
+                  ? 'Inconsistent with the Comprehensive Plan'
+                  : compLuLabel
+                    ? `Comprehensive Plan designates this area as: ${compLuLabel}`
+                    : 'Comprehensive Plan alignment unknown'}
+            </p>
+            {compLuLabel && (
+              <p className="text-xs font-semibold text-gray-600">
+                Comp Plan Designation: <span className="font-mono">{compLuCode}</span> — {compLuLabel}
+              </p>
+            )}
+            {compContext && (
+              <p className="text-xs text-gray-700 leading-relaxed mt-1">{compContext}</p>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* From → To */}
       <div className="flex items-stretch gap-3 flex-wrap">
-        <div className="flex-1 min-w-[140px] bg-white rounded-lg border border-indigo-200 p-3">
-          <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">
+        <div className="flex-1 min-w-[160px] bg-white rounded-lg border border-indigo-200 p-3 space-y-1">
+          <p className="text-[10px] font-bold text-gray-400 uppercase">
             {isPdAmend ? 'Existing PD' : 'Current Zoning'}
           </p>
-          <p className="text-sm font-bold text-gray-800 font-mono">{a.zoning_from_code}</p>
-          <p className="text-sm text-gray-600 mt-0.5">{a.zoning_from_label}</p>
-          {a.zoning_from_desc && a.zoning_from_desc !== a.zoning_from_label && (
-            <p className="text-xs text-gray-400 mt-1 leading-snug">{a.zoning_from_desc}</p>
+          <p className="text-base font-black text-gray-800 font-mono">{a.zoning_from_code}</p>
+          <p className="text-sm font-semibold text-gray-700">{fromInfo?.label || a.zoning_from_label}</p>
+          {(fromInfo?.allows || (a.zoning_from_desc && a.zoning_from_desc !== a.zoning_from_label)) && (
+            <p className="text-xs text-gray-500 leading-snug">{fromInfo?.allows || a.zoning_from_desc}</p>
           )}
         </div>
         <div className="flex items-center flex-shrink-0">
           <ArrowRight className="w-5 h-5 text-indigo-400" />
         </div>
-        <div className="flex-1 min-w-[140px] bg-indigo-100 rounded-lg border-2 border-indigo-300 p-3">
-          <p className="text-[10px] font-bold text-indigo-500 uppercase mb-1">
+        <div className="flex-1 min-w-[160px] bg-indigo-100 rounded-lg border-2 border-indigo-300 p-3 space-y-1">
+          <p className="text-[10px] font-bold text-indigo-500 uppercase">
             {isPdAmend ? 'Proposed Amendments' : 'Proposed Zoning'}
           </p>
-          <p className="text-sm font-bold text-indigo-900 font-mono">{a.zoning_to_code}</p>
-          <p className="text-sm text-indigo-700 mt-0.5">{a.zoning_to_label}</p>
-          {a.zoning_to_desc && a.zoning_to_desc !== a.zoning_to_label && (
-            <p className="text-xs text-indigo-500 mt-1 leading-snug">{a.zoning_to_desc}</p>
+          <p className="text-base font-black text-indigo-900 font-mono">{a.zoning_to_code}</p>
+          <p className="text-sm font-semibold text-indigo-800">{toInfo?.label || a.zoning_to_label}</p>
+          {(toInfo?.allows || (a.zoning_to_desc && a.zoning_to_desc !== a.zoning_to_label)) && (
+            <p className="text-xs text-indigo-600 leading-snug">{toInfo?.allows || a.zoning_to_desc}</p>
           )}
         </div>
       </div>
+
+      {/* Acreage + Applicant from GIS */}
+      {(a.acreage_estimate != null || a.zoning_applicant || a.zoning_action) && (
+        <div className="flex flex-wrap gap-4 text-sm bg-white/70 rounded-lg border border-indigo-100 px-4 py-3">
+          {a.acreage_estimate != null && (
+            <div>
+              <p className="text-[10px] font-bold text-gray-400 uppercase mb-0.5">Site Area</p>
+              <p className="font-semibold text-gray-800">{Number(a.acreage_estimate).toFixed(3)} acres</p>
+            </div>
+          )}
+          {a.zoning_applicant && (
+            <div>
+              <p className="text-[10px] font-bold text-gray-400 uppercase mb-0.5">Applicant</p>
+              <p className="font-semibold text-gray-800">{a.zoning_applicant}</p>
+            </div>
+          )}
+          {a.zoning_action && (
+            <div>
+              <p className="text-[10px] font-bold text-gray-400 uppercase mb-0.5">Recommended Action</p>
+              <p className="font-semibold text-gray-800">{a.zoning_action}</p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Approval type + vacancy row */}
       <div className="flex flex-wrap gap-3">

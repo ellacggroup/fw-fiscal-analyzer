@@ -393,11 +393,14 @@ def lookup_comprehensive_plan(item_text: str, category: str = "") -> dict:
 
         if lu_code and lu_code in LU_LABELS:
             base.update({
-                "comp_plan_lu_code":        lu_code,
-                "comp_plan_lu_label":       LU_LABELS[lu_code],
-                "comp_plan_lu_description": LU_DESCRIPTIONS.get(lu_code, ""),
-                "comp_plan_lookup_status":  "found",
-                "comp_plan_case_number":    case_num,
+                "comp_plan_lu_code":         lu_code,
+                "comp_plan_lu_label":        LU_LABELS[lu_code],
+                "comp_plan_lu_description":  LU_DESCRIPTIONS.get(lu_code, ""),
+                "comp_plan_lookup_status":   "found",
+                "comp_plan_case_number":     case_num,
+                "consistent_with_comp_plan": gis.get("consistent_with_comp_plan", ""),
+                "zoning_applicant":          gis.get("applicant", ""),
+                "zoning_action":             gis.get("action", ""),
             })
             return base
 
