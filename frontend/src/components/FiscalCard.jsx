@@ -422,10 +422,11 @@ function CompPlanSection({ analysis: a }) {
       )}
 
       {/* No address extracted */}
-      {status === 'no_address' && (
+      {(status === 'no_address' || !status) && (
         <p className="text-sm text-slate-500 leading-relaxed">
-          No specific street address could be extracted from this item.
-          Use the map link above to look up the parcel manually.
+          No specific street address could be automatically extracted from this item.
+          Open the map link above, search for the address or case number, and look up
+          the <strong>Future Land Use</strong> layer to see the comprehensive plan designation.
         </p>
       )}
 
@@ -436,7 +437,8 @@ function CompPlanSection({ analysis: a }) {
             Could not retrieve a comp plan designation for this address
             {a.comp_plan_address ? ` (${a.comp_plan_address})` : ''}.
             The parcel may be outside Fort Worth city limits, or the address
-            format wasn't recognized by the geocoder.
+            format wasn't recognized by the geocoder. Use the map link above
+            to look up the <strong>Future Land Use</strong> layer manually.
           </p>
           {a.comp_plan_address && (
             <p className="text-xs flex items-start gap-1 text-slate-400">
