@@ -308,11 +308,7 @@ async def reanalyze_agenda(upload_id: int, db: Session = Depends(get_db)):
 
         cat = _infer_category_label(merged, item_data.get("section", ""))
         if is_real_estate_item(cat, item_data.get("title", ""), item_data.get("description", "")):
-            cp = lookup_comprehensive_plan(
-                f"{item_data.get('title', '')} {item_data.get('description', '')}",
-                category=cat,
-            )
-            merged.update(cp)
+            _enrich_with_gis(merged, item_data, cat)
 
         db_item = AgendaItem(
             upload_id=upload_id,
