@@ -228,8 +228,8 @@ export default function FiscalCard({ item }) {
           )}
 
           {/* ── Zoning Request Detail ── */}
-          {analysis.zoning_request_parsed && (
-            <ZoningDetail analysis={analysis} />
+          {(analysis.zoning_request_parsed || isCompPlanItem(item)) && (
+            <ZoningDetail analysis={analysis} item={item} />
           )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -591,11 +591,38 @@ const APPROVAL_COLORS = {
   blue:   'bg-blue-100 text-blue-800 border-blue-300',
 }
 
-function ZoningDetail({ analysis: a }) {
+function ZoningDetail({ analysis: a, item }) {
   const [showScenarios, setShowScenarios] = useState(false)
   const scenarios = a.by_right_scenarios || []
   const statedFiscal = a.stated_use_fiscal
   const isPdAmend = a.zoning_from_code === a.zoning_to_code && a.zoning_from_code?.startsWith('PD')
+
+  // Fallback: item is a zoning change but specific codes couldn't be parsed
+  if (!a.zoning_request_parsed) {
+    return (
+      <div className="rounded-xl border-2 border-indigo-200 bg-indigo-50 p-4 space-y-3">
+        <h4 className="text-sm font-bold text-indigo-900 uppercase tracking-wide">
+          Zoning Request Detail
+        </h4>
+        <p className="text-sm text-indigo-700 leading-relaxed">
+          This is a zoning change request. The specific From/To zoning codes could not be
+          automatically extracted from the agenda text — the description may use an
+          non-standard format or the codes are embedded in the staff report.
+        </p>
+        <p className="text-sm text-indigo-700 leading-relaxed">
+          <strong>To see the full zoning detail:</strong> click <em>Reanalyze</em> in the
+          sidebar after today's deploy completes, or review the M&amp;C staff report for
+          the current and proposed zoning designations.
+        </p>
+        {a.revenue_explanation && (
+          <div className="flex items-start gap-2">
+            <DollarSign className="w-4 h-4 text-indigo-400 flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-gray-700 leading-relaxed">{a.revenue_explanation}</p>
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="rounded-xl border-2 border-indigo-200 bg-indigo-50 p-4 space-y-5">

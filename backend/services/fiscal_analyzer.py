@@ -367,6 +367,26 @@ _ZC_PD_AMEND = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
+# Fourth fallback: "change from CODE description to CODE description"
+# Matches informal phrasing without colons or quotes, e.g.:
+#   "rezone from A-5 One-Family to E Neighborhood Commercial"
+#   "change from AG Agricultural to PD/MU-1 Mixed Use"
+_ZC_CHANGE_FROM_TO = re.compile(
+    r'(?:change|rezone|rezoning|zoning\s+change)\s+from\s+'
+    r'([A-Z][A-Z0-9/\-]*(?:-\d+)?)\s*(.*?)\s+'
+    r'to\s+([A-Z][A-Z0-9/\-]*(?:-\d+)?)\s*(.*?)'
+    r'(?=\s*(?:,|\.|on\s+property|located|approximately|\(Recommended|\Z))',
+    re.IGNORECASE | re.DOTALL,
+)
+
+# Fifth fallback: simple "from CODE to CODE" anywhere in text
+_ZC_FROM_TO_SIMPLE = re.compile(
+    r'\bfrom\s+' + _Q + r'?([A-Z][A-Z0-9/\-]*(?:-\d+)?)' + _Q + r'?\s*([\w\s\-/]*?)\s+'
+    r'to\s+' + _Q + r'?([A-Z][A-Z0-9/\-]*(?:-\d+)?)' + _Q + r'?\s*([\w\s\-/]*?)'
+    r'(?=\s*(?:,|\.|on\s+property|located|approximately|\(Recommended|\Z))',
+    re.IGNORECASE | re.DOTALL,
+)
+
 # Map Fort Worth zone codes to plain-English land-use labels.
 # Covers all zone codes seen across FW agendas as of 2026.
 _FW_ZONE_MAP = {
@@ -496,14 +516,15 @@ def _fw_zone_label(code: str, description: str) -> str:
 def _parse_zoning_request(text: str) -> Optional[dict]:
     """
     Extract From/To zoning info from a Fort Worth ZC item description.
-    Returns dict or None if pattern not found.
-    Tries quoted regex first, then bare-code fallback.
+    Tries five patterns in order from most to least specific.
     """
+    # 1. Quoted From: / To: (canonical Fort Worth format)
     m = _ZC_FROM_TO.search(text)
     if not m:
+        # 2. Bare From: / To: (no quotes)
         m = _ZC_FROM_TO_BARE.search(text)
     if not m:
-        # PD amendment: "To: Amend PD[number] ..." with no explicit From: clause
+        # 3. PD amendment with no From: clause
         m3 = _ZC_PD_AMEND.search(text)
         if m3:
             pd_code = m3.group(1).strip()
@@ -519,6 +540,12 @@ def _parse_zoning_request(text: str) -> Optional[dict]:
                 "to_desc":    to_desc[:200],
                 "to_proto":   proto,
             }
+        # 4. Informal "change/rezone from CODE to CODE"
+        m = _ZC_CHANGE_FROM_TO.search(text)
+    if not m:
+        # 5. Simple "from CODE to CODE" anywhere in text
+        m = _ZC_FROM_TO_SIMPLE.search(text)
+    if not m:
         return None
 
     from_code = m.group(1).strip()
