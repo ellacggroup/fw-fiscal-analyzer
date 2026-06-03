@@ -338,10 +338,16 @@ def query_future_land_use(lon: float, lat: float) -> Optional[dict]:
 
 def lookup_comprehensive_plan(item_text: str, category: str = "") -> dict:
     """
-    Returns a dict of comp_plan_* fields to merge into the analysis blob.
-    Always sets comp_plan_relevant=True for qualifying items so the UI
-    section renders even when the GIS lookup cannot find a match.
+    Returns comp_plan_* fields to merge into the analysis blob.
+
+    Strategy (in order):
+      1. Extract ZC/SUP case number → query FW Zoning Cases GIS layer
+         → FUTURE_LAN gives the comp plan code directly (fastest, most accurate)
+      2. Extract street address / intersection → geocode → query Future Land Use layer
+      3. If still no match, mark relevant so the UI section still renders
     """
+    from services.zoning_gis_lookup import extract_case_numbers, lookup_zoning_case
+
     base: dict = {
         "comp_plan_relevant":       False,
         "comp_plan_address":        None,
@@ -365,12 +371,52 @@ def lookup_comprehensive_plan(item_text: str, category: str = "") -> dict:
 
     base["comp_plan_relevant"] = True
 
-    candidates = extract_location_candidates(item_text)
-    if not candidates:
-        return base   # stays "no_address"
+    # ── Strategy 1: ZC case number → Zoning Cases GIS layer ─────────────────
+    for case_num in extract_case_numbers(item_text):
+        gis = lookup_zoning_case(case_num)
+        if not gis:
+            continue
+
+        lu_code = gis.get("future_land_use_code", "").upper()
+        address = gis.get("address", "")
+
+        if address:
+            base["comp_plan_address"] = address
+            # Try to geocode the GIS address for a pinned map URL
+            coords = geocode(_fw(address))
+            if coords:
+                lon, lat = coords
+                base["comp_plan_map_url"] = (
+                    "https://cfw.maps.arcgis.com/apps/webappviewer/index.html"
+                    f"?id=653d3a58efc848a1ad1e7516ee56c509&center={lon},{lat}&level=16"
+                )
+
+        if lu_code and lu_code in LU_LABELS:
+            base.update({
+                "comp_plan_lu_code":        lu_code,
+                "comp_plan_lu_label":       LU_LABELS[lu_code],
+                "comp_plan_lu_description": LU_DESCRIPTIONS.get(lu_code, ""),
+                "comp_plan_lookup_status":  "found",
+                "comp_plan_case_number":    case_num,
+            })
+            return base
+
+        # GIS record found but no usable FUTURE_LAN — fall through to geocode
+        if address:
+            break   # use GIS address for geocode strategy below
+
+    # ── Strategy 2: address/intersection → geocode → FLU layer ───────────────
+    addr_candidates = extract_location_candidates(item_text)
+
+    # If GIS gave us an address, prepend it as the best candidate
+    gis_address = base.get("comp_plan_address")
+    if gis_address:
+        full = _fw(gis_address)
+        if full not in addr_candidates:
+            addr_candidates.insert(0, full)
 
     tried: list[str] = []
-    for address in candidates:
+    for address in addr_candidates:
         tried.append(address)
         coords = geocode(address)
         if not coords:
@@ -394,9 +440,10 @@ def lookup_comprehensive_plan(item_text: str, category: str = "") -> dict:
             })
             return base
 
-    # Tried at least one address but nothing matched
-    base["comp_plan_address"] = tried[0] if tried else None
-    base["comp_plan_lookup_status"] = "no_match"
+    if tried:
+        base["comp_plan_address"] = tried[0]
+        base["comp_plan_lookup_status"] = "no_match"
+
     return base
 
 

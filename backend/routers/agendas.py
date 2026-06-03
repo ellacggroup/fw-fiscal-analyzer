@@ -7,6 +7,7 @@ from services.fiscal_analyzer import analyze_fiscal_impact
 from services.pdf_parser import detect_meeting_date, extract_agenda_items, extract_text_from_pdf
 from services.url_fetcher import fetch_pdf_from_url
 from services.comprehensive_plan import lookup_comprehensive_plan, is_real_estate_item
+from services.zoning_gis_lookup import extract_case_numbers, lookup_zoning_case
 
 router = APIRouter(prefix="/agendas", tags=["agendas"])
 
@@ -127,15 +128,11 @@ async def _process_pdf(
 
         merged_analyses.append(merged)
 
-    # Comprehensive plan land use lookup for real estate / zoning items
+    # GIS enrichment: comp plan + zoning case lookup for real estate / zoning items
     for i, (item_data, merged) in enumerate(zip(raw_items, merged_analyses)):
         cat = _infer_category_label(merged, item_data.get("section", ""))
         if is_real_estate_item(cat, item_data.get("title", ""), item_data.get("description", "")):
-            cp = lookup_comprehensive_plan(
-                f"{item_data.get('title', '')} {item_data.get('description', '')}",
-                category=cat,
-            )
-            merged_analyses[i].update(cp)
+            _enrich_with_gis(merged, item_data, cat)
 
     # Persist
     upload = AgendaUpload(
@@ -235,11 +232,7 @@ async def reanalyze_all_agendas(db: Session = Depends(get_db)):
 
                 cat = _infer_category_label(merged, item_data.get("section", ""))
                 if is_real_estate_item(cat, item_data.get("title", ""), item_data.get("description", "")):
-                    cp = lookup_comprehensive_plan(
-                        f"{item_data.get('title', '')} {item_data.get('description', '')}",
-                        category=cat,
-                    )
-                    merged.update(cp)
+                    _enrich_with_gis(merged, item_data, cat)
 
                 db_item = AgendaItem(
                     upload_id=upload.id,
@@ -394,6 +387,39 @@ def _serialize(item: AgendaItem) -> dict:
         "category": item.category,
         "analysis": item.analysis,
     }
+
+
+def _enrich_with_gis(merged: dict, item_data: dict, cat: str) -> None:
+    """
+    Run comp-plan + zoning-case GIS lookups and merge results into *merged*.
+    When the zoning regex failed to parse From/To codes, GIS data fills them in.
+    """
+    item_text = f"{item_data.get('title', '')} {item_data.get('description', '')}"
+
+    # Comp plan lookup (also calls zoning GIS internally)
+    cp = lookup_comprehensive_plan(item_text, category=cat)
+    merged.update(cp)
+
+    # If zoning_request_parsed is False, try to fill From/To from Zoning Cases GIS
+    if not merged.get("zoning_request_parsed"):
+        for case_num in extract_case_numbers(item_text):
+            gis = lookup_zoning_case(case_num)
+            if not gis:
+                continue
+            if gis.get("zoning_from") or gis.get("zoning_to"):
+                merged["zoning_from_code"]    = gis["zoning_from"]
+                merged["zoning_to_code"]      = gis["zoning_to"]
+                merged["zoning_from_label"]   = gis["zoning_from"]
+                merged["zoning_to_label"]     = gis["zoning_to"]
+                merged["zoning_from_desc"]    = ""
+                merged["zoning_to_desc"]      = gis["zoning_to"]
+                merged["zoning_request_parsed"] = True
+                merged["zoning_gis_source"]   = True
+                if gis.get("acres") and not merged.get("acreage_estimate"):
+                    merged["acreage_estimate"] = gis["acres"]
+                if gis.get("address") and not merged.get("comp_plan_address"):
+                    merged["comp_plan_address"] = gis["address"]
+                break
 
 
 def _infer_category_label(analysis: dict, section: str = "") -> str:
