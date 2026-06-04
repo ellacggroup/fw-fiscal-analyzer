@@ -275,6 +275,23 @@ export default function FiscalCard({ item }) {
             <p className="text-xs text-gray-500 italic">{analysis.one_time_vs_recurring_note}</p>
           )}
 
+          {/* ── Text amendment notice ── */}
+          {analysis.text_amendment && (
+            <div className="rounded-xl border-2 border-slate-300 bg-slate-50 p-4 space-y-2">
+              <p className="text-xs font-bold text-slate-700 uppercase tracking-wide">
+                Zoning Code Text Amendment — No Land Rezoned
+              </p>
+              <p className="text-sm text-slate-700 leading-relaxed">
+                This item changes the written rules of Fort Worth's Unified Development Code citywide.
+                No specific parcel is being rezoned. There is no direct fiscal impact.
+                Any future effects depend entirely on what projects are later built under the new standards — those are not yet known.
+              </p>
+              <p className="text-xs text-slate-500 italic">
+                Source: Item title and description confirm "Text Amendment." No GIS parcel data exists for this item.
+              </p>
+            </div>
+          )}
+
           {/* ── Annexation hearing notice ── */}
           {analysis.annexation_hearing && (
             <div className="rounded-xl border-2 border-amber-200 bg-amber-50 p-4">
@@ -305,9 +322,19 @@ export default function FiscalCard({ item }) {
             <ZoningDetail analysis={analysis} item={item} />
           )}
 
+          {/* ── Unverified estimate warning for zoning items with no GIS data ── */}
+          {isCompPlanItem(item) && !analysis.text_amendment && !analysis.zoning_gis_source && rating !== 'UNKNOWN' && (
+            <div className="flex items-start gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-300 rounded-lg p-3">
+              <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+              <span>
+                <strong>Financial estimates below are unverified model projections.</strong> Fort Worth's GIS system returned no data for this case number. Figures are based on zone-type benchmarks, not verified parcel data. Do not rely on these numbers without cross-referencing the M&amp;C staff report.
+              </span>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {/* Revenue & Costs */}
-            {rating !== 'UNKNOWN' && (
+            {rating !== 'UNKNOWN' && !analysis.text_amendment && (
               <DetailSection title="Financial Estimates (Year 1)">
                 <DetailRow label="Revenue" value={analysis.year1_revenue_estimate != null ? `$${analysis.year1_revenue_estimate.toLocaleString()}` : '—'} />
                 <DetailRow label="Costs" value={analysis.year1_cost_estimate != null ? `$${analysis.year1_cost_estimate.toLocaleString()}` : '—'} />

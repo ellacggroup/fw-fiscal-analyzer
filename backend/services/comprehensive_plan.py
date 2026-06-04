@@ -62,6 +62,9 @@ LU_LABELS: dict[str, str] = {
     "PRIPK": "Open Space / Private Parkland",
     "AG":    "Agricultural (Vacant)",
     "WATER": "Lakes and Ponds",
+    "PRIOS": "Panther Island / River District Open Space",
+    "TL-N":  "Trinity Lakes North",
+    "SY-TSA-130": "Stockyards Traditional Surrounding Area",
 }
 
 LU_DESCRIPTIONS: dict[str, str] = {
@@ -86,6 +89,10 @@ LU_DESCRIPTIONS: dict[str, str] = {
     "PRIPK": "Private open space, greenways, nature preserves.",
     "AG":    "Agricultural land and vacant/undeveloped parcels.",
     "WATER": "Lakes, ponds, and major water bodies.",
+    # Stockyards / specialty districts
+    "PRIOS": "Panther Island / River District Open Space — designated open space within the Trinity River Vision area.",
+    "TL-N":  "Trinity Lakes North — mixed-use lakefront development area within the Trinity River Vision corridor.",
+    "SY-TSA-130": "Stockyards Traditional Surrounding Area — historic Stockyards district overlay zone.",
 }
 
 # ---------------------------------------------------------------------------

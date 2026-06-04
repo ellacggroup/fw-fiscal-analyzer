@@ -863,6 +863,22 @@ def _enrich_zoning_analysis(result: dict, title: str, description: str, acreage:
 
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Text amendment detection
+# ---------------------------------------------------------------------------
+_TEXT_AMENDMENT_RE = re.compile(
+    r'\btext\s+amendment\b|\bcode\s+amendment\b|\bunified\s+development\s+code\b'
+    r'|\bUDC\s+amendment\b|\bzoning\s+ordinance\s+amendment\b'
+    r'|\bordinance\s+amendment\b',
+    re.IGNORECASE,
+)
+
+def _is_text_amendment(title: str, description: str) -> bool:
+    """Return True if this is a zoning code text amendment (no specific parcel)."""
+    text = title + " " + description
+    return bool(_TEXT_AMENDMENT_RE.search(text))
+
+
 # Main analysis function
 # ---------------------------------------------------------------------------
 def analyze_fiscal_impact(item: dict) -> dict:
@@ -875,6 +891,34 @@ def analyze_fiscal_impact(item: dict) -> dict:
     title = item.get("title", "")
     description = item.get("description", "")
     text = title + " " + description
+
+    # Text amendments change zoning ordinance language, not any specific parcel.
+    # Detect before category classification so we don't fabricate land-use data.
+    if _is_text_amendment(title, description):
+        return {
+            "category": "Policy / Ordinance",
+            "fiscal_impact_rating": "NEUTRAL",
+            "confidence": "HIGH",
+            "risk_level": "LOW",
+            "is_recurring": False,
+            "land_use_type": "N/A",
+            "acreage_estimate": None,
+            "text_amendment": True,
+            "analysis_narrative": (
+                "This is a zoning ordinance text amendment — it changes the written rules "
+                "of Fort Worth's Unified Development Code citywide, not the zoning of any "
+                "specific parcel. No land is being rezoned. There is no direct fiscal impact "
+                "on city revenue or costs from this item. Any future fiscal effects would "
+                "come from development projects that use the new standards, which are not "
+                "yet known."
+            ),
+            "caveats": (
+                "Text amendments are legislative changes to the zoning code. Fiscal impact "
+                "cannot be estimated without knowing which future projects will use the amended standards."
+            ),
+            "departments_impacted": ["Planning & Development"],
+            "comp_plan_relevant": False,
+        }
 
     category = _classify_category(title, description)
     land_use = _classify_land_use(title, description)
