@@ -62,8 +62,7 @@ LU_LABELS: dict[str, str] = {
     "PRIPK": "Open Space / Private Parkland",
     "AG":    "Agricultural (Vacant)",
     "WATER": "Lakes and Ponds",
-    "PRIOS": "Panther Island / River District Open Space",
-    "TL-N":  "Trinity Lakes North",
+    "PRIOS": "Private Open Space (unverified — not in published comp plan legend)",
     "SY-TSA-130": "Stockyards Traditional Surrounding Area",
 }
 
@@ -89,9 +88,8 @@ LU_DESCRIPTIONS: dict[str, str] = {
     "PRIPK": "Private open space, greenways, nature preserves.",
     "AG":    "Agricultural land and vacant/undeveloped parcels.",
     "WATER": "Lakes, ponds, and major water bodies.",
-    # Stockyards / specialty districts
-    "PRIOS": "Panther Island / River District Open Space — designated open space within the Trinity River Vision area.",
-    "TL-N":  "Trinity Lakes North — mixed-use lakefront development area within the Trinity River Vision corridor.",
+    # Non-standard codes returned by FW GIS but not defined in the published comp plan legend
+    "PRIOS": "Private Open Space — code returned by Fort Worth GIS; not defined in the published comp plan legend. Likely denotes private open space, consistent with the PRIPK/PUBPK naming pattern. Verify with Fort Worth Planning & Development.",
     "SY-TSA-130": "Stockyards Traditional Surrounding Area — historic Stockyards district overlay zone.",
 }
 
