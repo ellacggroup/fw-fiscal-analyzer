@@ -227,6 +227,29 @@ def extract_location_candidates(text: str) -> list[str]:
             seen.add(s)
             results.append(s)
 
+    # 0. Dual address: "5329 & 5355 Main Street" → use first number + street
+    _P_DUAL = re.compile(
+        r'(?<!\d)(\d{3,6})\s*[&,]\s*\d{3,6}\s+'
+        r'(' + _DIR + r'[A-Za-z][A-Za-z0-9\.\s\-]{1,40}?' + _SUFFIX + r')',
+        re.IGNORECASE,
+    )
+    for m in _P_DUAL.finditer(text):
+        num = m.group(1)
+        street = _clean(m.group(2))
+        add(f"{num} {street}")
+
+    # 0b. Boundary description: "generally bounded by ... Street" → extract first named street
+    _P_BOUNDED = re.compile(
+        r'(?:generally\s+bounded\s+by|between|north\s+of|south\s+of|east\s+of|west\s+of)'
+        r'\s+(?:the\s+)?'
+        r'(' + _DIR + r'[A-Za-z][A-Za-z0-9\.\s\-]{1,40}?' + _SUFFIX + r')',
+        re.IGNORECASE,
+    )
+    for m in _P_BOUNDED.finditer(text):
+        street = _clean(m.group(1))
+        if len(street) > 5:
+            add(street)
+
     # 1. Standard numbered addresses (most specific — try first)
     for m in _P_NUMBERED.finditer(text):
         num = m.group(1)
@@ -299,6 +322,44 @@ def geocode(address: str) -> Optional[tuple[float, float]]:
 
 
 # ---------------------------------------------------------------------------
+# FLU reverse mapping — some GIS records return full labels instead of codes
+# ---------------------------------------------------------------------------
+_FLU_LABEL_TO_CODE: dict[str, str] = {
+    "SINGLE-FAMILY RESIDENTIAL":  "SF",
+    "SINGLE FAMILY RESIDENTIAL":  "SF",
+    "SUBURBAN RESIDENTIAL":        "SUB",
+    "RURAL RESIDENTIAL":           "RURAL",
+    "LOW-DENSITY RESIDENTIAL":     "LDR",
+    "LOW DENSITY RESIDENTIAL":     "LDR",
+    "MEDIUM-DENSITY RESIDENTIAL":  "MDR",
+    "MEDIUM DENSITY RESIDENTIAL":  "MDR",
+    "HIGH-DENSITY RESIDENTIAL":    "HDR",
+    "HIGH DENSITY RESIDENTIAL":    "HDR",
+    "URBAN RESIDENTIAL":           "UR",
+    "MANUFACTURED HOUSING":        "MH",
+    "NEIGHBORHOOD COMMERCIAL":     "NC",
+    "GENERAL COMMERCIAL":          "GC",
+    "MIXED-USE":                   "MU",
+    "MIXED USE":                   "MU",
+    "MIXED-USE GROWTH CENTER":     "MUGC",
+    "MIXED USE GROWTH CENTER":     "MUGC",
+    "LIGHT INDUSTRIAL":            "LI",
+    "HEAVY INDUSTRIAL":            "HI",
+    "INDUSTRIAL GROWTH CENTER":    "IGC",
+    "INSTITUTIONAL":               "INST",
+    "INFRASTRUCTURE":              "INFRA",
+    "EXISTING PUBLIC PARKLAND":    "PUBPK",
+    "PUBLIC PARK":                 "PUBPK",
+    "PRIVATE PARK":                "PRIPK",
+    "OPEN SPACE / PRIVATE PARKLAND": "PRIPK",
+    "AGRICULTURAL":                "AG",
+    "AGRICULTURAL (VACANT)":       "AG",
+    "LAKES AND PONDS":             "WATER",
+    "WATER":                       "WATER",
+}
+
+
+# ---------------------------------------------------------------------------
 # Future Land Use spatial query
 # ---------------------------------------------------------------------------
 
@@ -322,13 +383,15 @@ def query_future_land_use(lon: float, lat: float) -> Optional[dict]:
         if not results:
             return None
         attrs = results[0].get("attributes", {})
-        lu_code = (attrs.get("LU") or attrs.get("lu") or "").strip().upper()
+        lu_raw  = (attrs.get("LU") or attrs.get("lu") or "").strip().upper()
         mu_cat  = attrs.get("MU_Category") or attrs.get("MU_CATEGORY") or ""
-        if not lu_code:
+        if not lu_raw:
             return None
+        # Some parcels return the full label instead of the code — reverse-map it
+        lu_code = _FLU_LABEL_TO_CODE.get(lu_raw, lu_raw)
         return {
             "lu_code":        lu_code,
-            "lu_label":       LU_LABELS.get(lu_code, lu_code),
+            "lu_label":       LU_LABELS.get(lu_code, lu_code.title()),
             "lu_description": LU_DESCRIPTIONS.get(lu_code, ""),
             "mu_category":    mu_cat or None,
         }

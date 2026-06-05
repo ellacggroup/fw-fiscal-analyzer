@@ -889,19 +889,30 @@ _ECONOMIC_INCENTIVE_RE = re.compile(
     r'\btax\s+abatement\b'
     r'|\bchapter\s+380\b'
     r'|\b380\s+agreement\b'
-    r'|\btirz\b'
-    r'|\btax\s+increment\s+reinvestment\b'
+    r'|\btirz\b(?!\s+(?:board|director|member|chair|appoint))'
+    r'|\btax\s+increment\s+reinvestment\s+zone\b'
     r'|\btax\s+increment\s+financ\b'
-    r'|\beconomic\s+development\s+agreement\b'
+    r'|\beconomic\s+development\s+(?:program\s+)?agreement\b'
     r'|\bincentive\s+agreement\b'
     r'|\btax\s+rebate\s+agreement\b'
-    r'|\bfee\s+waiver\s+agreement\b',
+    r'|\babatement\s+reinvestment\s+zone\b',
+    re.IGNORECASE,
+)
+
+# Patterns that look like incentives but are actually board/personnel actions
+_INCENTIVE_EXCLUSION_RE = re.compile(
+    r'\bappoint\w*\b.*\b(?:board|director|member|chair|commission)\b'
+    r'|\b(?:board|director|member|chair)\b.*\bappoint\w*\b',
     re.IGNORECASE,
 )
 
 def _is_economic_incentive(title: str, description: str) -> bool:
     """Return True if this is an economic incentive deal regardless of section."""
-    return bool(_ECONOMIC_INCENTIVE_RE.search(title + " " + description))
+    text = title + " " + description
+    # Exclude board appointments to TIF zones — they mention TIRZ but aren't deals
+    if _INCENTIVE_EXCLUSION_RE.search(title):
+        return False
+    return bool(_ECONOMIC_INCENTIVE_RE.search(text))
 
 
 # Main analysis function
@@ -1296,14 +1307,31 @@ def _economic_incentive_analysis(dollar_amount: Optional[float], title: str, des
         except ValueError:
             pass
 
+    # Detect manufacturing / industrial deals for job estimates
+    is_manufacturing = any(k in text for k in [
+        'manufactur', 'electronics', 'industrial', 'distribution', 'logistics',
+        'data center', 'warehouse', 'assembly', 'production',
+    ])
+    is_mixed_use = any(k in text for k in ['mixed-use', 'mixed use', 'residential', 'retail', 'office'])
+
     if assessed_val and incentive_type == "Tax Abatement":
         prop_tax_rate = 0.7125 / 100
-        pct = 0.75  # Fort Worth typically abates 75-100% for residential; assume 75%
+        # Manufacturing/industrial: city typically abates 75-100%
+        # Commercial/residential: typically 50-75%
+        pct = 0.80 if is_manufacturing else 0.65
         year1_forgone = round(assessed_val * prop_tax_rate * pct * -1)
         abate_years = years or 5
-        # Simple sum over abatement period (no NPV — revenue never collected)
         projection_net = round(year1_forgone * abate_years)
         rating = "NEGATIVE" if year1_forgone < -5000 else "NEUTRAL"
+
+    # Job and investment estimates for manufacturing deals
+    jobs_note = ""
+    if is_manufacturing and assessed_val:
+        est_jobs = max(50, round(assessed_val / 200_000))  # rough: $200K assessed per job
+        jobs_note = f" Electronics/manufacturing facilities of this scale typically employ {est_jobs}–{est_jobs*2} direct workers."
+    elif is_mixed_use and assessed_val:
+        est_jobs = max(20, round(assessed_val / 300_000))
+        jobs_note = f" Mixed-use developments of this scale typically generate {est_jobs}–{est_jobs*2} permanent jobs."
 
     return {
         "fiscal_impact_rating":    rating,
@@ -1319,12 +1347,12 @@ def _economic_incentive_analysis(dollar_amount: Optional[float], title: str, des
         "break_even_year":         None,
         "key_revenue_sources":     ["Property tax revenue after incentive expires"],
         "key_cost_drivers":        ["Foregone property tax during incentive period"],
-        "analysis_narrative":      explanation,
+        "analysis_narrative":      explanation + jobs_note,
         "caveats": (
-            f"Forgone revenue estimate based on assessed value found in item text "
-            f"and Fort Worth's ${0.7125:.4f} per $100 property tax rate. "
-            f"Actual terms — abatement percentage, assessed value, and eligible improvements — "
-            f"are in the M&C staff report and may differ significantly."
+            f"Forgone revenue estimate uses Fort Worth's $0.7125 per $100 property tax rate "
+            f"and an assumed {round(pct*100 if assessed_val and incentive_type=='Tax Abatement' else 70)}% abatement rate. "
+            f"Actual terms — abatement percentage, assessed value, eligible improvements, and "
+            f"job/investment commitments — are in the M&C staff report and supersede these estimates."
             if assessed_val else
             "No assessed value found in item text. Forgone revenue cannot be estimated "
             "without the full agreement terms from the M&C staff report."

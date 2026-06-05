@@ -392,6 +392,10 @@ def _enrich_with_gis(merged: dict, item_data: dict, cat: str) -> None:
     """
     item_text = f"{item_data.get('title', '')} {item_data.get('description', '')}"
 
+    # Skip comp plan lookup for text amendments — no parcel, no address
+    if merged.get("text_amendment"):
+        return
+
     # Comp plan lookup (also calls zoning GIS internally)
     cp = lookup_comprehensive_plan(item_text, category=cat)
     merged.update(cp)
