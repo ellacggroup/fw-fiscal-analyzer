@@ -151,8 +151,8 @@ _CATEGORY_KEYWORDS = {
     "Economic Incentive": [
         "tax abatement", "abatement agreement", "chapter 380", "380 agreement",
         "economic development agreement", "incentive agreement", "tirz",
-        "tax increment reinvestment", "tif", "tax increment financing",
-        "tax rebate", "fee waiver", "economic incentive", "business incentive",
+        "tax increment reinvestment zone", "tax increment financing",
+        "tax rebate agreement", "economic incentive", "business incentive",
         "enterprise zone", "eda agreement",
     ],
     "Development Agreement": [
@@ -1281,24 +1281,53 @@ def _economic_incentive_analysis(dollar_amount: Optional[float], title: str, des
         years = int(m.group(1))
         break
 
+    # Estimate forgone revenue for abatements using assessed value if mentioned
+    year1_forgone = None
+    projection_net = None
+    assessed_val = None
+    for m in re.finditer(r'\$\s*([\d,]+(?:\.\d+)?)\s*(?:million|M\b)?', text, re.IGNORECASE):
+        try:
+            val = float(m.group(1).replace(',', ''))
+            if 'million' in m.group(0).lower() or m.group(0).strip().endswith('M'):
+                val *= 1_000_000
+            if val > 50_000:   # ignore small dollar amounts
+                assessed_val = val
+                break
+        except ValueError:
+            pass
+
+    if assessed_val and incentive_type == "Tax Abatement":
+        prop_tax_rate = 0.7125 / 100
+        pct = 0.75  # Fort Worth typically abates 75-100% for residential; assume 75%
+        year1_forgone = round(assessed_val * prop_tax_rate * pct * -1)
+        abate_years = years or 5
+        # Simple sum over abatement period (no NPV — revenue never collected)
+        projection_net = round(year1_forgone * abate_years)
+        rating = "NEGATIVE" if year1_forgone < -5000 else "NEUTRAL"
+
     return {
-        "fiscal_impact_rating":   rating,
-        "confidence":             "MEDIUM",
-        "risk_level":             "MEDIUM",
+        "fiscal_impact_rating":    rating,
+        "confidence":              "MEDIUM" if assessed_val else "LOW",
+        "risk_level":              "MEDIUM",
         "economic_incentive_type": incentive_type,
-        "incentive_term_years":   years,
-        "year1_revenue_estimate": None,
-        "year1_cost_estimate":    None,
-        "year1_net_impact":       None,
-        "revenue_to_cost_ratio":  None,
-        "projection_40yr_net":    None,
-        "break_even_year":        None,
-        "key_revenue_sources":    ["Deferred — contingent on project performance"],
-        "key_cost_drivers":       ["Foregone tax revenue during incentive period"],
-        "analysis_narrative":     explanation,
+        "incentive_term_years":    years,
+        "year1_revenue_estimate":  0,
+        "year1_cost_estimate":     abs(year1_forgone) if year1_forgone else None,
+        "year1_net_impact":        year1_forgone,
+        "revenue_to_cost_ratio":   None,
+        "projection_40yr_net":     projection_net,
+        "break_even_year":         None,
+        "key_revenue_sources":     ["Property tax revenue after incentive expires"],
+        "key_cost_drivers":        ["Foregone property tax during incentive period"],
+        "analysis_narrative":      explanation,
         "caveats": (
-            "Fiscal impact cannot be precisely estimated without the full incentive agreement terms "
-            "from the M&C staff report. Do not rely on model estimates for incentive deals."
+            f"Forgone revenue estimate based on assessed value found in item text "
+            f"and Fort Worth's ${0.7125:.4f} per $100 property tax rate. "
+            f"Actual terms — abatement percentage, assessed value, and eligible improvements — "
+            f"are in the M&C staff report and may differ significantly."
+            if assessed_val else
+            "No assessed value found in item text. Forgone revenue cannot be estimated "
+            "without the full agreement terms from the M&C staff report."
         ),
     }
 

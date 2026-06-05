@@ -81,6 +81,7 @@ def extract_agenda_items(text: str) -> list[dict]:
     items = []
     current_item = None
     current_section = ""
+    current_section_letter = ""   # tracks A, B, C, D, E, F, etc.
     in_skip_section = False
     item_counter = 0
 
@@ -115,6 +116,13 @@ def extract_agenda_items(text: str) -> list[dict]:
 
         # Detect section headers
         if is_section_header(stripped):
+            # Check if this is a single-letter section header (A, B, C, D, E, F, G…)
+            single_letter = re.match(r'^([A-Z])\s*[-–—:]?\s*(.*)', stripped)
+            if single_letter and len(stripped) <= 80:
+                letter = single_letter.group(1)
+                if letter not in ('I',):  # skip "I" (likely Roman numeral or word)
+                    current_section_letter = letter
+
             if section_is_skippable(stripped):
                 flush()
                 in_skip_section = True
@@ -152,11 +160,16 @@ def extract_agenda_items(text: str) -> list[dict]:
                 ref = None
 
             if item_match:
-                num = (item_match.group(1) or item_match.group(2) or "").rstrip(".")
+                raw_num = (item_match.group(1) or item_match.group(2) or "").rstrip(".")
                 title_text = item_match.group(3).strip()
                 if ref and ref not in title_text:
                     title_text = f"{ref} — {title_text}"
-                item_num = num
+                # Prefix numeric items with the current section letter so
+                # A-#2, B-#2, C-#2 don't all appear as "#2"
+                if current_section_letter and re.match(r'^\d+$', raw_num):
+                    item_num = f"{current_section_letter}-{raw_num}"
+                else:
+                    item_num = raw_num
             else:
                 title_text = stripped
                 item_num = str(item_counter)
