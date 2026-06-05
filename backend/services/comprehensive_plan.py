@@ -129,7 +129,8 @@ _SUFFIX = (
     r"Loop|Freeway|Fwy|Highway|Hwy|Circle|Cir|Terrace|Ter|"
     r"Run|Path|Pass|Pike|Point|Pt|Bend|Crossing|Cove|"
     r"Commons|Landing|Ridge|Creek|Row|Expressway|Expy|"
-    r"North|South|East|West)"
+    r"North|South|East|West|"
+    r"\d+(?:st|nd|rd|th))"   # ordinal street names: 1st Ave, 2nd St, etc.
 )
 
 _DIR = r"(?:[NSEW]\.?\s+|North\s+|South\s+|East\s+|West\s+|NE\s+|NW\s+|SE\s+|SW\s+)?"
@@ -226,6 +227,25 @@ def extract_location_candidates(text: str) -> list[str]:
         if s not in seen:
             seen.add(s)
             results.append(s)
+
+    # -1. Ordinal-only address: "5329 1st", "1234 5th Avenue" (ordinal may be street name)
+    _P_ORDINAL = re.compile(
+        r'(?<!\d)(\d{3,6})\s+(?:&\s*\d{3,6}\s+)?(\d+(?:st|nd|rd|th)(?:\s+(?:Street|St|Avenue|Ave|Road|Rd|Drive|Dr|Lane|Ln|Way))?)',
+        re.IGNORECASE,
+    )
+    for m in _P_ORDINAL.finditer(text):
+        add(f"{m.group(1)} {m.group(2).strip()}")
+
+    # -0.5. "of [Street Name]" — common in large-area FW descriptions
+    #   e.g. "North, South and West of N. Normandale Street between..."
+    _P_OF_STREET = re.compile(
+        r'\bof\s+(' + _DIR + r'[A-Z][A-Za-z0-9\.\s\-]{2,35}?' + _SUFFIX + r')\b',
+        re.IGNORECASE,
+    )
+    for m in _P_OF_STREET.finditer(text):
+        street = _clean(m.group(1))
+        if len(street) > 5:
+            add(street)
 
     # 0. Dual address: "5329 & 5355 Main Street" → use first number + street
     _P_DUAL = re.compile(
