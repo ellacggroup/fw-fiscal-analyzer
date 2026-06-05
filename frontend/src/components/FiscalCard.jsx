@@ -275,6 +275,27 @@ export default function FiscalCard({ item }) {
             <p className="text-xs text-gray-500 italic">{analysis.one_time_vs_recurring_note}</p>
           )}
 
+          {/* ── Economic Incentive detail ── */}
+          {analysis.economic_incentive_type && (
+            <div className="rounded-xl border-2 border-emerald-300 bg-emerald-50 p-4 space-y-3">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <h4 className="text-sm font-bold text-emerald-900 uppercase tracking-wide">
+                  {analysis.economic_incentive_type}
+                </h4>
+                {analysis.incentive_term_years && (
+                  <span className="text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-300 px-2.5 py-1 rounded-full">
+                    {analysis.incentive_term_years}-Year Term
+                  </span>
+                )}
+              </div>
+              <p className="text-sm text-emerald-900 leading-relaxed">{analysis.analysis_narrative}</p>
+              <div className="flex items-start gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                <span>Exact fiscal impact requires the full agreement terms from the M&amp;C staff report. The city is trading near-term revenue for expected long-term economic growth — verify the terms before drawing conclusions.</span>
+              </div>
+            </div>
+          )}
+
           {/* ── Text amendment notice ── */}
           {analysis.text_amendment && (
             <div className="rounded-xl border-2 border-slate-300 bg-slate-50 p-4 space-y-2">
@@ -322,6 +343,8 @@ export default function FiscalCard({ item }) {
             <ZoningDetail analysis={analysis} item={item} />
           )}
 
+          {/* ── Economic incentive items: suppress fabricated financial estimates ── */}
+
           {/* ── Unverified estimate warning for zoning items with no GIS data ── */}
           {isCompPlanItem(item) && !analysis.text_amendment && !analysis.zoning_gis_source && rating !== 'UNKNOWN' && (
             <div className="flex items-start gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-300 rounded-lg p-3">
@@ -334,7 +357,7 @@ export default function FiscalCard({ item }) {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {/* Revenue & Costs */}
-            {rating !== 'UNKNOWN' && !analysis.text_amendment && (
+            {rating !== 'UNKNOWN' && !analysis.text_amendment && !analysis.economic_incentive_type && (
               <DetailSection title="Financial Estimates (Year 1)">
                 <DetailRow label="Revenue" value={analysis.year1_revenue_estimate != null ? `$${analysis.year1_revenue_estimate.toLocaleString()}` : '—'} />
                 <DetailRow label="Costs" value={analysis.year1_cost_estimate != null ? `$${analysis.year1_cost_estimate.toLocaleString()}` : '—'} />
