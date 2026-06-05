@@ -885,6 +885,25 @@ def _is_text_amendment(title: str, description: str) -> bool:
     return bool(_TEXT_AMENDMENT_RE.search(text))
 
 
+_ECONOMIC_INCENTIVE_RE = re.compile(
+    r'\btax\s+abatement\b'
+    r'|\bchapter\s+380\b'
+    r'|\b380\s+agreement\b'
+    r'|\btirz\b'
+    r'|\btax\s+increment\s+reinvestment\b'
+    r'|\btax\s+increment\s+financ\b'
+    r'|\beconomic\s+development\s+agreement\b'
+    r'|\bincentive\s+agreement\b'
+    r'|\btax\s+rebate\s+agreement\b'
+    r'|\bfee\s+waiver\s+agreement\b',
+    re.IGNORECASE,
+)
+
+def _is_economic_incentive(title: str, description: str) -> bool:
+    """Return True if this is an economic incentive deal regardless of section."""
+    return bool(_ECONOMIC_INCENTIVE_RE.search(title + " " + description))
+
+
 # Main analysis function
 # ---------------------------------------------------------------------------
 def analyze_fiscal_impact(item: dict) -> dict:
@@ -925,6 +944,17 @@ def analyze_fiscal_impact(item: dict) -> dict:
             "departments_impacted": ["Planning & Development"],
             "comp_plan_relevant": False,
         }
+
+    # Economic incentive deals appear under "Award of Contract" in FW agendas
+    # but must be separated — detect before the keyword scorer runs.
+    if _is_economic_incentive(title, description):
+        dollar_amount = _extract_dollar(text)
+        result = _economic_incentive_analysis(dollar_amount, title, description)
+        result["category"] = "Economic Incentive"
+        result["land_use_type"] = "N/A"
+        result["acreage_estimate"] = None
+        result["departments_impacted"] = ["Planning & Development", "Finance"]
+        return result
 
     category = _classify_category(title, description)
     land_use = _classify_land_use(title, description)
