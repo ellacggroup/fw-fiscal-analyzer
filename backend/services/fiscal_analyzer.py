@@ -948,8 +948,11 @@ _SPLIT_PARCEL_RE = re.compile(
 def _is_economic_incentive(title: str, description: str) -> bool:
     """Return True if this is an economic incentive deal regardless of section."""
     text = title + " " + description
-    # Exclude board appointments and officer assignments to TIF/TIRZ boards
-    if _INCENTIVE_EXCLUSION_RE.search(title) or _INCENTIVE_EXCLUSION_RE.search(text[:200]):
+    # Exclude board appointments and officer assignments to TIF/TIRZ boards.
+    # Check the full combined text — resolution titles like "25-5215 A Resolution
+    # Appointing Macy Hill to the Board of Directors of Tax Increment Reinvestment Zone"
+    # contain "Appointing" after the reference number prefix.
+    if _INCENTIVE_EXCLUSION_RE.search(text):
         return False
     return bool(_ECONOMIC_INCENTIVE_RE.search(text))
 

@@ -44,14 +44,23 @@ _SUBSTANTIVE_SECTIONS = {
 }
 
 # Patterns for Fort Worth M&C references and similar
+# Matches both "M&C CD-2025-0001" (older) and "M&C 25-0557" (newer year-number format)
 _MC_PATTERN = re.compile(
-    r'\bM&?C\s+([A-Z]-\d{4,6})\b', re.IGNORECASE
+    r'\bM&?C\s+([A-Z]-\d{4,6}|\d{2}-\d{4,6})\b', re.IGNORECASE
+)
+# Standalone year-number reference on its own line: "25-0557"
+_MC_STANDALONE_RE = re.compile(
+    r'^(\d{2}-\d{4,6})\s*$'
 )
 _ZC_PATTERN = re.compile(
     r'\b(ZC-\d{2}-\d{3,4})\b', re.IGNORECASE
 )
 _SP_PATTERN = re.compile(
     r'\b(SP-\d{2}-\d{3,4})\b', re.IGNORECASE
+)
+# Resolution item numbers like "25-5215"
+_RES_PATTERN = re.compile(
+    r'\b(\d{2}-\d{4,5})\b'
 )
 
 # Item number patterns — matches "1.", "2.", "A.", "B.", "1.1.", "Item 5"
@@ -108,6 +117,28 @@ def extract_agenda_items(text: str) -> list[dict]:
     def section_is_substantive(section_text: str) -> bool:
         sl = section_text.lower().strip().rstrip(":")
         return any(kw in sl for kw in _SUBSTANTIVE_SECTIONS)
+
+    # Pre-join split-line M&C format: lines like "1. M&C   (ALL) ..." followed by "25-0557"
+    # In the 2025 agenda format, "M&C" appears with the item text and the number is on the next line
+    joined_lines = []
+    i = 0
+    while i < len(lines):
+        ln = lines[i].rstrip()
+        stripped_ln = ln.strip()
+        # If this line contains "M&C" but no number yet, peek at next line for standalone number
+        if re.search(r'\bM&?C\b', stripped_ln, re.IGNORECASE) and not _MC_PATTERN.search(stripped_ln):
+            if i + 1 < len(lines):
+                next_ln = lines[i + 1].strip()
+                if _MC_STANDALONE_RE.match(next_ln):
+                    # Inject the number into this line
+                    ln = stripped_ln + ' ' + next_ln
+                    i += 2
+                    joined_lines.append(ln)
+                    continue
+        # Also handle: "1. M&C\n   25-0557\n   (ALL) description..." three-line split
+        joined_lines.append(ln)
+        i += 1
+    lines = joined_lines
 
     for line in lines:
         stripped = line.strip()
