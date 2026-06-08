@@ -401,18 +401,6 @@ export default function FiscalCard({ item }) {
               </DetailSection>
             )}
 
-            {/* Land use */}
-            {analysis.land_use_type && analysis.land_use_type !== 'N/A' && (
-              <DetailSection title="Land Use Details">
-                <DetailRow label="Type" value={analysis.land_use_type} />
-                {analysis.acreage_estimate != null && (
-                  <DetailRow label="Estimated Acres" value={`${analysis.acreage_estimate.toLocaleString()} ac`} />
-                )}
-                {analysis.units_or_sqft_estimate != null && (
-                  <DetailRow label="Units / Sq Ft" value={analysis.units_or_sqft_estimate.toLocaleString()} />
-                )}
-              </DetailSection>
-            )}
 
             {/* Revenue sources */}
             {analysis.key_revenue_sources?.length > 0 && (
