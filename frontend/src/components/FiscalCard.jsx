@@ -248,6 +248,42 @@ export default function FiscalCard({ item }) {
             <p className="text-sm text-gray-700 leading-relaxed">{primaryNarrative}</p>
           )}
 
+          {/* ── Finance Director Certification — authoritative fiscal statement ── */}
+          {analysis.finance_certified && (
+            <div className={`rounded-xl border-2 p-4 flex items-start gap-3 ${
+              analysis.finance_certified_rating === 'POSITIVE' ? 'bg-green-50 border-green-400' :
+              analysis.finance_certified_rating === 'NEGATIVE' ? 'bg-red-50 border-red-400' :
+              analysis.finance_certified_rating === 'NEUTRAL'  ? 'bg-yellow-50 border-yellow-400' :
+                                                                  'bg-blue-50 border-blue-300'
+            }`}>
+              <CheckCircle className={`w-5 h-5 flex-shrink-0 mt-0.5 ${
+                analysis.finance_certified_rating === 'POSITIVE' ? 'text-green-600' :
+                analysis.finance_certified_rating === 'NEGATIVE' ? 'text-red-600' :
+                analysis.finance_certified_rating === 'NEUTRAL'  ? 'text-yellow-600' :
+                                                                    'text-blue-500'
+              }`} />
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wide mb-0.5 text-gray-700">
+                  Director of Finance Certification
+                </p>
+                <p className="text-sm text-gray-800 leading-relaxed">{analysis.finance_certified_note}</p>
+              </div>
+            </div>
+          )}
+
+          {/* ── Split-parcel notice ── */}
+          {analysis.split_parcel && (
+            <div className="rounded-xl border-2 border-amber-300 bg-amber-50 p-4 flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wide mb-0.5 text-amber-800">
+                  Multiple Owners / Tracts
+                </p>
+                <p className="text-sm text-amber-900 leading-relaxed">{analysis.split_parcel_note}</p>
+              </div>
+            </div>
+          )}
+
           {/* If Claude summary and rule-based narrative are both present, show rule-based as secondary */}
           {analysis.claude_summary && analysis.analysis_narrative && (
             <details className="group">

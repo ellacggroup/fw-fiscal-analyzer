@@ -902,17 +902,101 @@ _ECONOMIC_INCENTIVE_RE = re.compile(
 # Patterns that look like incentives but are actually board/personnel actions
 _INCENTIVE_EXCLUSION_RE = re.compile(
     r'\bappoint\w*\b.*\b(?:board|director|member|chair|commission)\b'
-    r'|\b(?:board|director|member|chair)\b.*\bappoint\w*\b',
+    r'|\b(?:board|director|member|chair)\b.*\bappoint\w*\b'
+    # Resolution titles: "Appointing [Name] to the Board of Directors of Tax Increment..."
+    r'|\bappointing\b'
+    # Vice-chair / officer assignments to existing TIF boards
+    r'|\bvice.chair\w*\b.*\b(?:tirz|tif|tax increment)\b'
+    r'|\b(?:tirz|tif|tax increment)\b.*\bvice.chair\w*\b',
     re.IGNORECASE,
 )
+
+# Finance Director certification language present in Fort Worth M&C staff reports
+_FINANCE_CERTIFICATION_RE = re.compile(
+    r'director\s+of\s+finance\s+certif\w+'
+    r'|finance\s+director\s+certif\w+'
+    r'|fiscal\s+information\s*/\s*certification',
+    re.IGNORECASE,
+)
+
+_FINANCE_POSITIVE_RE = re.compile(
+    r'(?:positive|favorable)\s+impact\s+to\s+the\s+(?:general\s+)?fund'
+    r'|long.term\s+positive\s+impact',
+    re.IGNORECASE,
+)
+
+_FINANCE_NEGATIVE_RE = re.compile(
+    r'(?:negative|adverse)\s+impact\s+to\s+the\s+(?:general\s+)?fund',
+    re.IGNORECASE,
+)
+
+_FINANCE_NEUTRAL_RE = re.compile(
+    r'no\s+(?:fiscal|financial)\s+impact\s+to\s+the\s+(?:general\s+)?fund'
+    r'|(?:neutral|no\s+net)\s+impact\s+to\s+the\s+(?:general\s+)?fund',
+    re.IGNORECASE,
+)
+
+# Split-parcel: multiple owners or multiple zoning designations in one M&C
+_SPLIT_PARCEL_RE = re.compile(
+    r'\band\s+[A-Z][a-z]+\w+\s+(?:LLC|Inc|Corp|Trust|LP|LLP|et\s+al)\b'
+    r'|\bmultiple\s+(?:owners?|parcels?|tracts?)\b'
+    r'|\bowner\s*[12]\b|\bparcel\s*[12]\b',
+    re.IGNORECASE,
+)
+
 
 def _is_economic_incentive(title: str, description: str) -> bool:
     """Return True if this is an economic incentive deal regardless of section."""
     text = title + " " + description
-    # Exclude board appointments to TIF zones — they mention TIRZ but aren't deals
-    if _INCENTIVE_EXCLUSION_RE.search(title):
+    # Exclude board appointments and officer assignments to TIF/TIRZ boards
+    if _INCENTIVE_EXCLUSION_RE.search(title) or _INCENTIVE_EXCLUSION_RE.search(text[:200]):
         return False
     return bool(_ECONOMIC_INCENTIVE_RE.search(text))
+
+
+def _extract_finance_certification(text: str) -> dict:
+    """
+    Detect and extract the Finance Director certification from M&C staff report text.
+    Returns a dict with certified_rating and certified_note, or empty dict if none found.
+    """
+    if not _FINANCE_CERTIFICATION_RE.search(text):
+        return {}
+    if _FINANCE_POSITIVE_RE.search(text):
+        return {
+            "finance_certified": True,
+            "finance_certified_rating": "POSITIVE",
+            "finance_certified_note": (
+                "The Director of Finance has certified this item will have a "
+                "long-term positive impact to the General Fund."
+            ),
+        }
+    if _FINANCE_NEGATIVE_RE.search(text):
+        return {
+            "finance_certified": True,
+            "finance_certified_rating": "NEGATIVE",
+            "finance_certified_note": (
+                "The Director of Finance has certified this item will have a "
+                "negative impact to the General Fund."
+            ),
+        }
+    if _FINANCE_NEUTRAL_RE.search(text):
+        return {
+            "finance_certified": True,
+            "finance_certified_rating": "NEUTRAL",
+            "finance_certified_note": (
+                "The Director of Finance has certified there is no fiscal impact "
+                "to the General Fund from this item."
+            ),
+        }
+    # Certification section present but outcome not parsed
+    return {
+        "finance_certified": True,
+        "finance_certified_rating": None,
+        "finance_certified_note": (
+            "A Finance Director certification is present in this M&C. "
+            "See the full staff report for the certified fiscal impact."
+        ),
+    }
 
 
 # Main analysis function
@@ -956,6 +1040,10 @@ def analyze_fiscal_impact(item: dict) -> dict:
             "comp_plan_relevant": False,
         }
 
+    # Extract Finance Director certification before any other analysis —
+    # it is the authoritative fiscal statement and overrides prototype estimates.
+    finance_cert = _extract_finance_certification(text)
+
     # Economic incentive deals appear under "Award of Contract" in FW agendas
     # but must be separated — detect before the keyword scorer runs.
     if _is_economic_incentive(title, description):
@@ -965,6 +1053,7 @@ def analyze_fiscal_impact(item: dict) -> dict:
         result["land_use_type"] = "N/A"
         result["acreage_estimate"] = None
         result["departments_impacted"] = ["Planning & Development", "Finance"]
+        result.update(finance_cert)
         return result
 
     category = _classify_category(title, description)
@@ -990,6 +1079,23 @@ def analyze_fiscal_impact(item: dict) -> dict:
     # Ensure rating exists
     if "fiscal_impact_rating" not in result:
         result["fiscal_impact_rating"] = "UNKNOWN"
+
+    # Attach Finance Director certification — authoritative for annexations and M&C items
+    if finance_cert:
+        result.update(finance_cert)
+        # If certified, use the certified rating as the authoritative fiscal_impact_rating
+        if finance_cert.get("finance_certified_rating"):
+            result["fiscal_impact_rating"] = finance_cert["finance_certified_rating"]
+            result["confidence"] = "HIGH"
+
+    # Flag split-parcel annexations — multiple owners/tracts with different land uses
+    if category == "Annexation" and _SPLIT_PARCEL_RE.search(text):
+        result["split_parcel"] = True
+        result["split_parcel_note"] = (
+            "This annexation involves multiple property owners or tracts, potentially with "
+            "different land uses and zoning designations. The fiscal estimate above applies "
+            "only to the dominant land use. See the M&C staff report for a parcel-by-parcel breakdown."
+        )
 
     # For zoning cases, add enriched From/To analysis
     if category == "Zoning Change":
