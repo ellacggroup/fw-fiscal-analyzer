@@ -383,38 +383,60 @@ _FLU_LABEL_TO_CODE: dict[str, str] = {
 # Future Land Use spatial query
 # ---------------------------------------------------------------------------
 
-def query_future_land_use(lon: float, lat: float) -> Optional[dict]:
-    """Query the FW Future Land Use MapServer layer at (lon, lat)."""
+def _query_flu_at(lon: float, lat: float) -> Optional[dict]:
+    """Single FLU identify query at exact coordinates."""
     params = {
         "geometry": f"{lon},{lat}",
         "geometryType": "esriGeometryPoint",
         "sr": str(OUT_SR),
         "layers": "all:6",
-        "tolerance": "10",
-        "mapExtent": f"{lon-0.002},{lat-0.002},{lon+0.002},{lat+0.002}",
+        "tolerance": "20",
+        "mapExtent": f"{lon-0.005},{lat-0.005},{lon+0.005},{lat+0.005}",
         "imageDisplay": "800,600,96",
         "returnGeometry": "false",
         "f": "json",
     }
+    r = httpx.get(FUTURE_LAND_USE_URL, params=params, timeout=12)
+    r.raise_for_status()
+    results = r.json().get("results", [])
+    if not results:
+        return None
+    attrs = results[0].get("attributes", {})
+    lu_raw = (attrs.get("LU") or attrs.get("lu") or "").strip().upper()
+    mu_cat = attrs.get("MU_Category") or attrs.get("MU_CATEGORY") or ""
+    if not lu_raw:
+        return None
+    lu_code = _FLU_LABEL_TO_CODE.get(lu_raw, lu_raw)
+    return {
+        "lu_code":        lu_code,
+        "lu_label":       LU_LABELS.get(lu_code, lu_code.title()),
+        "lu_description": LU_DESCRIPTIONS.get(lu_code, ""),
+        "mu_category":    mu_cat or None,
+    }
+
+
+def query_future_land_use(lon: float, lat: float) -> Optional[dict]:
+    """
+    Query the FW Future Land Use MapServer layer at (lon, lat).
+    If the exact point falls in a polygon gap, tries nearby offsets
+    (±0.005° in each cardinal direction) before giving up.
+    """
+    # Offsets in degrees: exact point first, then expanding rings out to ~2km
+    # Needed for large-area rezonings where the center may fall in a coverage gap
+    offsets = [
+        (0, 0),
+        (0, 0.005), (0, -0.005), (0.005, 0), (-0.005, 0),
+        (0.010, 0), (-0.010, 0), (0, 0.010), (0, -0.010),
+        (0.015, 0), (-0.015, 0), (0, 0.015), (0, -0.015),
+        (0.015, 0.015), (-0.015, 0.015), (0.015, -0.015), (-0.015, -0.015),
+        (0.020, 0), (-0.020, 0), (0, 0.020), (0, -0.020),
+    ]
     try:
-        r = httpx.get(FUTURE_LAND_USE_URL, params=params, timeout=12)
-        r.raise_for_status()
-        results = r.json().get("results", [])
-        if not results:
-            return None
-        attrs = results[0].get("attributes", {})
-        lu_raw  = (attrs.get("LU") or attrs.get("lu") or "").strip().upper()
-        mu_cat  = attrs.get("MU_Category") or attrs.get("MU_CATEGORY") or ""
-        if not lu_raw:
-            return None
-        # Some parcels return the full label instead of the code — reverse-map it
-        lu_code = _FLU_LABEL_TO_CODE.get(lu_raw, lu_raw)
-        return {
-            "lu_code":        lu_code,
-            "lu_label":       LU_LABELS.get(lu_code, lu_code.title()),
-            "lu_description": LU_DESCRIPTIONS.get(lu_code, ""),
-            "mu_category":    mu_cat or None,
-        }
+        for dlon, dlat in offsets:
+            result = _query_flu_at(lon + dlon, lat + dlat)
+            if result:
+                return result
+        return None
     except Exception as exc:
         logger.warning("FLU query failed at (%.5f, %.5f): %s", lon, lat, exc)
         return None

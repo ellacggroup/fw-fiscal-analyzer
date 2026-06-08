@@ -1292,70 +1292,120 @@ def _economic_incentive_analysis(dollar_amount: Optional[float], title: str, des
         years = int(m.group(1))
         break
 
-    # Estimate forgone revenue for abatements using assessed value if mentioned
-    year1_forgone = None
-    projection_net = None
+    # Extract the largest dollar figure mentioned — typically the investment commitment value
     assessed_val = None
     for m in re.finditer(r'\$\s*([\d,]+(?:\.\d+)?)\s*(?:million|M\b)?', text, re.IGNORECASE):
         try:
             val = float(m.group(1).replace(',', ''))
             if 'million' in m.group(0).lower() or m.group(0).strip().endswith('M'):
                 val *= 1_000_000
-            if val > 50_000:   # ignore small dollar amounts
+            if val > 50_000:
                 assessed_val = val
                 break
         except ValueError:
             pass
 
-    # Detect manufacturing / industrial deals for job estimates
+    # Detect deal type for job estimates and abatement range
     is_manufacturing = any(k in text for k in [
         'manufactur', 'electronics', 'industrial', 'distribution', 'logistics',
         'data center', 'warehouse', 'assembly', 'production',
     ])
     is_mixed_use = any(k in text for k in ['mixed-use', 'mixed use', 'residential', 'retail', 'office'])
 
-    if assessed_val and incentive_type == "Tax Abatement":
-        prop_tax_rate = 0.7125 / 100
-        # Manufacturing/industrial: city typically abates 75-100%
-        # Commercial/residential: typically 50-75%
-        pct = 0.80 if is_manufacturing else 0.65
-        year1_forgone = round(assessed_val * prop_tax_rate * pct * -1)
-        abate_years = years or 5
-        projection_net = round(year1_forgone * abate_years)
-        rating = "NEGATIVE" if year1_forgone < -5000 else "NEUTRAL"
+    prop_tax_rate = 0.7125 / 100  # Fort Worth FY2026
 
-    # Job and investment estimates for manufacturing deals
+    # ── Minimum impact calculation ────────────────────────────────────────────
+    # Use the LOWEST abatement percentage in the typical Fort Worth range to
+    # produce a conservative floor — the city foregoes at least this much.
+    # Manufacturing/industrial: Fort Worth agreements typically run 50–100%
+    # Commercial/mixed-use: typically 30–75%
+    # Chapter 380 rebates: city rebates a share of new sales/property tax generated;
+    #   minimum rebate share is typically 25% of incremental revenue
+    year1_forgone = None
+    year1_full_tax = None  # what the city would collect with no deal
+    projection_net = None
+
+    if assessed_val:
+        year1_full_tax = round(assessed_val * prop_tax_rate)
+
+        if incentive_type == "Tax Abatement":
+            # Minimum abatement percentage = conservative floor
+            min_pct = 0.50 if is_manufacturing else 0.30
+            year1_forgone = round(assessed_val * prop_tax_rate * min_pct * -1)
+            abate_years = years or 5
+            projection_net = round(year1_forgone * abate_years)
+            rating = "NEGATIVE" if year1_forgone < -5000 else "NEUTRAL"
+
+        elif incentive_type == "Chapter 380 Agreement":
+            # City rebates back a portion of sales or property tax generated;
+            # minimum rebate share is 25% of year-1 revenue — use as floor
+            min_rebate_pct = 0.25
+            year1_forgone = round(assessed_val * prop_tax_rate * min_rebate_pct * -1)
+            abate_years = years or 5
+            projection_net = round(year1_forgone * abate_years)
+            rating = "NEGATIVE" if year1_forgone < -5000 else "NEUTRAL"
+
+        elif incentive_type == "TIRZ / Tax Increment Financing":
+            # City captures only the base-year tax; all increment goes to the zone.
+            # Minimum impact = 100% of incremental property tax forgone.
+            year1_forgone = round(assessed_val * prop_tax_rate * -1)
+            abate_years = years or 10
+            projection_net = round(year1_forgone * abate_years)
+            rating = "NEGATIVE"
+
+        else:
+            # Generic incentive — use 25% of assessed value tax as minimum floor
+            year1_forgone = round(assessed_val * prop_tax_rate * 0.25 * -1)
+            abate_years = years or 5
+            projection_net = round(year1_forgone * abate_years)
+            rating = "NEGATIVE" if year1_forgone < -5000 else "NEUTRAL"
+
+    # Job estimates
     jobs_note = ""
     if is_manufacturing and assessed_val:
-        est_jobs = max(50, round(assessed_val / 200_000))  # rough: $200K assessed per job
-        jobs_note = f" Electronics/manufacturing facilities of this scale typically employ {est_jobs}–{est_jobs*2} direct workers."
+        est_jobs = max(50, round(assessed_val / 200_000))
+        jobs_note = f" Facilities of this investment scale typically employ {est_jobs}–{est_jobs*2} direct workers."
     elif is_mixed_use and assessed_val:
         est_jobs = max(20, round(assessed_val / 300_000))
-        jobs_note = f" Mixed-use developments of this scale typically generate {est_jobs}–{est_jobs*2} permanent jobs."
+        jobs_note = f" Mixed-use developments of this investment scale typically generate {est_jobs}–{est_jobs*2} permanent jobs."
+
+    # Minimum impact narrative suffix
+    if assessed_val and year1_forgone is not None:
+        min_impact_note = (
+            f" Minimum estimated city revenue foregone: ${abs(year1_forgone):,.0f}/year"
+            f" (${abs(projection_net):,.0f} over {abate_years} years)."
+            f" Full property tax without any incentive would be approximately ${year1_full_tax:,.0f}/year."
+            f" Actual terms in the M&C staff report may result in higher foregone revenue."
+        )
+    else:
+        min_impact_note = (
+            " No investment value found in agenda text. Minimum foregone revenue cannot be"
+            " calculated — the M&C staff report contains the assessed value and abatement terms."
+        )
 
     return {
-        "fiscal_impact_rating":    rating,
-        "confidence":              "MEDIUM" if assessed_val else "LOW",
-        "risk_level":              "MEDIUM",
-        "economic_incentive_type": incentive_type,
-        "incentive_term_years":    years,
-        "year1_revenue_estimate":  0,
-        "year1_cost_estimate":     abs(year1_forgone) if year1_forgone else None,
-        "year1_net_impact":        year1_forgone,
-        "revenue_to_cost_ratio":   None,
-        "projection_40yr_net":     projection_net,
-        "break_even_year":         None,
-        "key_revenue_sources":     ["Property tax revenue after incentive expires"],
-        "key_cost_drivers":        ["Foregone property tax during incentive period"],
-        "analysis_narrative":      explanation + jobs_note,
+        "fiscal_impact_rating":         rating,
+        "confidence":                   "MEDIUM" if assessed_val else "LOW",
+        "risk_level":                   "MEDIUM",
+        "economic_incentive_type":      incentive_type,
+        "incentive_term_years":         years,
+        "year1_revenue_estimate":       year1_full_tax or 0,
+        "year1_cost_estimate":          abs(year1_forgone) if year1_forgone else None,
+        "year1_net_impact":             year1_forgone,
+        "revenue_to_cost_ratio":        None,
+        "projection_40yr_net":          projection_net,
+        "break_even_year":              None,
+        "key_revenue_sources":          ["Property tax (ad valorem — reduced or deferred during incentive period)", "Property tax revenue after incentive expires"],
+        "key_cost_drivers":             ["Foregone property tax during incentive period"],
+        "analysis_narrative":           explanation + jobs_note + min_impact_note,
         "caveats": (
-            f"Forgone revenue estimate uses Fort Worth's $0.7125 per $100 property tax rate "
-            f"and an assumed {round(pct*100 if assessed_val and incentive_type=='Tax Abatement' else 70)}% abatement rate. "
-            f"Actual terms — abatement percentage, assessed value, eligible improvements, and "
-            f"job/investment commitments — are in the M&C staff report and supersede these estimates."
+            f"Minimum impact estimate uses Fort Worth's $0.7125/$100 property tax rate and the"
+            f" lowest end of the typical abatement range for this deal type. Actual foregone"
+            f" revenue depends on the specific abatement percentage, eligible improvement value,"
+            f" and term length stated in the M&C staff report."
             if assessed_val else
-            "No assessed value found in item text. Forgone revenue cannot be estimated "
-            "without the full agreement terms from the M&C staff report."
+            "No assessed value found in agenda text. Minimum impact cannot be estimated without"
+            " the full agreement terms from the M&C staff report."
         ),
     }
 
@@ -1439,7 +1489,7 @@ def _land_use_analysis(
             "revenue_to_cost_ratio": None,
             "projection_40yr_net": None,
             "break_even_year": None,
-            "key_revenue_sources": [],
+            "key_revenue_sources": ["Property tax (ad valorem)"],
             "key_cost_drivers": [],
             "infrastructure_requirements": None,
             "units_or_sqft_estimate": None,
@@ -1475,6 +1525,9 @@ def _land_use_analysis(
 
     # Revenue sources and cost drivers by land use
     rev_sources, cost_drivers = _land_use_revenue_costs(land_use)
+    # Property tax applies to every zoning item — ensure it is always listed
+    if not any("property tax" in s.lower() for s in rev_sources):
+        rev_sources = ["Property tax (ad valorem)"] + list(rev_sources)
 
     # Infrastructure note for annexations
     infra = None
@@ -1556,15 +1609,15 @@ def _land_use_revenue_costs(land_use: str):
             ["Police services", "Fire / EMS services", "Street maintenance", "Parks maintenance"],
         ),
         "Public / Institutional": (
-            ["Intergovernmental transfers (limited)"],
+            ["Property tax (ad valorem — exempt if tax-exempt entity)", "Intergovernmental transfers (limited)"],
             ["Street maintenance", "Fire / EMS services", "Utility subsidies"],
         ),
         "Open Space / Park": (
-            ["Grants (limited)", "Recreation fees (minimal)"],
+            ["Property tax (ad valorem — typically exempt)", "Grants (limited)", "Recreation fees (minimal)"],
             ["Parks maintenance", "Trail maintenance"],
         ),
     }
-    return defaults.get(land_use, (["Various"], ["Various"]))
+    return defaults.get(land_use, (["Property tax (ad valorem)", "Various"], ["Various"]))
 
 
 # ---------------------------------------------------------------------------
