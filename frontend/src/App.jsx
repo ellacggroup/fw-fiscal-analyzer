@@ -22,7 +22,14 @@ export default function App() {
   const [filterCategory, setFilterCategory] = useState('ALL')
 
   useEffect(() => {
-    listAgendas().then(setAgendaHistory).catch(() => {})
+    listAgendas()
+      .then(data => {
+        const sorted = [...data].sort((a, b) =>
+          new Date(b.uploaded_at) - new Date(a.uploaded_at)
+        )
+        setAgendaHistory(sorted)
+      })
+      .catch(() => {})
   }, [])
 
   const handleUpload = useCallback(async (file) => {
@@ -33,7 +40,7 @@ export default function App() {
       const result = await uploadAndAnalyzeAgenda(file)
       setCurrentAgenda(result)
       const history = await listAgendas()
-      setAgendaHistory(history)
+      setAgendaHistory([...history].sort((a, b) => new Date(b.uploaded_at) - new Date(a.uploaded_at)))
     } catch (err) {
       const msg = err.response?.data?.detail || err.message || 'An error occurred.'
       setError(msg)
@@ -50,7 +57,7 @@ export default function App() {
       const result = await uploadFromUrl(url)
       setCurrentAgenda(result)
       const history = await listAgendas()
-      setAgendaHistory(history)
+      setAgendaHistory([...history].sort((a, b) => new Date(b.uploaded_at) - new Date(a.uploaded_at)))
     } catch (err) {
       const msg = err.response?.data?.detail || err.message || 'An error occurred.'
       setError(msg)

@@ -1,12 +1,20 @@
 import { useState } from 'react'
-import { FileText, Clock, RefreshCw, Layers } from 'lucide-react'
+import { FileText, Clock, RefreshCw, Layers, Search, X } from 'lucide-react'
 import { reanalyzeAgenda, reanalyzeAll } from '../services/api'
 
 export default function HistorySidebar({ agendas, currentId, onSelect, onReanalyzed }) {
   const [reanalyzing, setReanalyzing] = useState(null)
   const [reanalyzingAll, setReanalyzingAll] = useState(false)
+  const [search, setSearch] = useState('')
 
   if (!agendas.length) return null
+
+  const filtered = search.trim()
+    ? agendas.filter(a =>
+        (a.filename || '').toLowerCase().includes(search.toLowerCase()) ||
+        (a.meeting_date || '').toLowerCase().includes(search.toLowerCase())
+      )
+    : agendas
 
   async function handleReanalyze(e, uploadId) {
     e.stopPropagation()
@@ -50,8 +58,32 @@ export default function HistorySidebar({ agendas, currentId, onSelect, onReanaly
           {reanalyzingAll ? 'Updating…' : 'Refresh All'}
         </button>
       </div>
+
+      {/* Search bar */}
+      <div className="relative mb-3">
+        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+        <input
+          type="text"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search agendas…"
+          className="w-full pl-8 pr-7 py-1.5 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-fw-blue focus:ring-1 focus:ring-fw-blue placeholder-gray-400"
+        />
+        {search && (
+          <button
+            onClick={() => setSearch('')}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+
       <div className="space-y-2">
-        {agendas.map((a) => (
+        {filtered.length === 0 && (
+          <p className="text-xs text-gray-400 text-center py-4">No agendas match "{search}"</p>
+        )}
+        {filtered.map((a) => (
           <div
             key={a.upload_id}
             onClick={() => onSelect(a.upload_id)}
