@@ -646,15 +646,15 @@ def _zoning_revenue_explanation(
             f"The proposed zoning ({to_label}) has a ratio of {to_rc:.2f}."
         )
 
-    # Explain the main revenue mechanism for the proposed use
+    # Explain the main revenue mechanism for the proposed use — facts only, no opinions
     mechanisms = {
-        "Commercial Retail":       "Commercial uses generate sales tax revenue (Fort Worth keeps 1 cent of every dollar spent at retail and restaurants) plus property tax at typically higher assessed values per acre than residential.",
-        "Industrial / Warehouse":  "Industrial uses generate property tax revenue from buildings and equipment, and impose low service costs (no schools, parks, or daily police calls). The city typically nets $2+ for every $1 spent serving industrial land.",
-        "Single-Family Residential": "Single-family homes generate property tax revenue but also require police, fire, parks, and school-related infrastructure. Fort Worth's own annexation analyses show residential uses often cost more to serve than they generate.",
-        "Multifamily Residential": "Multifamily housing generates property tax and utility fees. Higher density means more revenue per acre than single-family, though service costs are also higher.",
-        "Mixed-Use":               "Mixed-use development blends residential (property tax, utility fees) and commercial (sales tax) revenue streams, generally producing a stronger fiscal return than purely residential development.",
-        "Public / Institutional":  "Institutional uses (schools, government, churches) are typically tax-exempt, generating little direct city revenue while requiring city services. Fiscally this is the least favorable category.",
-        "Open Space / Park":       "Open space generates minimal direct revenue. Its fiscal value is indirect — property value uplift for nearby parcels that do pay taxes.",
+        "Commercial Retail":         "Commercial uses generate sales tax revenue (Fort Worth retains 1¢ per taxable dollar) and property tax. Sales tax applies to retail goods; most services are not taxable in Texas.",
+        "Industrial / Warehouse":    "Industrial uses generate property tax on buildings and equipment. Service demand is generally lower than residential uses (no parks, schools, or frequent police calls).",
+        "Single-Family Residential": "Single-family residential uses generate ad valorem property tax and utility fees. Service obligations include police, fire/EMS, street maintenance, and parks.",
+        "Multifamily Residential":   "Multifamily residential uses generate ad valorem property tax and utility fees. Higher density produces more revenue per acre than single-family at comparable assessed values.",
+        "Mixed-Use":                 "Mixed-use development generates ad valorem property tax on all improvements and, where retail tenants are present, sales tax on taxable goods sold.",
+        "Public / Institutional":    "Community Facilities and institutional uses (schools, churches, government buildings) are generally exempt from ad valorem property tax under Texas law. Direct city revenue from the parcel is limited to utility fees and permits.",
+        "Open Space / Park":         "Open space and floodplain designations generate no property tax revenue. The parcel produces no direct city revenue in this classification.",
     }
     explanation = mechanisms.get(to_proto)
     if explanation:
@@ -794,6 +794,11 @@ def _enrich_zoning_analysis(result: dict, title: str, description: str, acreage:
     result["zoning_to_label"]   = zr["to_label"]
     result["zoning_to_desc"]    = zr["to_desc"]
 
+    # land_use_type must reflect the PROPOSED (to) zoning, not the keyword-matched
+    # classification from the item title which may match the from zoning instead.
+    if zr.get("to_proto") and zr["to_proto"] != "Unknown / Not Applicable":
+        result["land_use_type"] = zr["to_proto"]
+
     # Vacancy
     vacancy_status, vacancy_rationale = _assess_vacancy(text)
     result["vacancy_status"]    = vacancy_status
@@ -817,6 +822,21 @@ def _enrich_zoning_analysis(result: dict, title: str, description: str, acreage:
         result["year1_cost_estimate"]    = impact["annual_incremental_cost"]
         result["year1_net_impact"]       = impact["annual_net_change"]
         result["projection_40yr_net"]    = impact["projected_40yr_impact"]
+        # Rewrite the narrative to match the enriched numbers so there is no contradiction
+        net = impact["annual_net_change"]
+        cumulative = impact["projected_40yr_impact"] or 0
+        to_proto_label = zr.get("to_proto") or zr.get("to_label") or "proposed use"
+        result["analysis_narrative"] = (
+            f"This zoning change involves approximately {assumed_acres:,.2f} acres. "
+            f"Proposed zoning: {zr['to_label']} ({zr['to_code']}). "
+            f"Based on Fort Worth fiscal parameters, the estimated incremental Year 1 net fiscal "
+            f"impact relative to current zoning is "
+            f"{'a surplus of' if net >= 0 else 'a deficit of'} ${abs(net):,.0f}. "
+            f"Over 40 years, the estimated cumulative net change is ${cumulative:,.0f}. "
+            f"These figures represent the change from current zoning, not absolute revenue."
+        )
+        if not acreage:
+            result["analysis_narrative"] += " Acreage not found in agenda text — estimate assumes 1 acre."
 
     # ── Approval type ────────────────────────────────────────────────────
     approval = detect_approval_type(zr["to_code"], zr["to_desc"])
