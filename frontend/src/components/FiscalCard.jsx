@@ -837,6 +837,14 @@ function ZoningDetail({ analysis: a, item }) {
         </div>
       )}
 
+      {/* Dual-zoning notice */}
+      {a.dual_zoning && a.dual_zoning_note && (
+        <div className="flex items-start gap-2 bg-amber-50 border border-amber-300 rounded-lg p-3">
+          <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+          <p className="text-xs text-amber-900 leading-relaxed">{a.dual_zoning_note}</p>
+        </div>
+      )}
+
       {/* From → To */}
       <div className="flex items-stretch gap-3 flex-wrap">
         <div className="flex-1 min-w-[160px] bg-white rounded-lg border border-indigo-200 p-3 space-y-1">
@@ -852,14 +860,28 @@ function ZoningDetail({ analysis: a, item }) {
         <div className="flex items-center flex-shrink-0">
           <ArrowRight className="w-5 h-5 text-indigo-400" />
         </div>
-        <div className="flex-1 min-w-[160px] bg-indigo-100 rounded-lg border-2 border-indigo-300 p-3 space-y-1">
-          <p className="text-[10px] font-bold text-indigo-500 uppercase">
-            {isPdAmend ? 'Proposed Amendments' : 'Proposed Zoning'}
-          </p>
-          <p className="text-base font-black text-indigo-900 font-mono">{a.zoning_to_code}</p>
-          <p className="text-sm font-semibold text-indigo-800">{toInfo?.label || a.zoning_to_label}</p>
-          {(toInfo?.allows || (a.zoning_to_desc && a.zoning_to_desc !== a.zoning_to_label)) && (
-            <p className="text-xs text-indigo-600 leading-snug">{toInfo?.allows || a.zoning_to_desc}</p>
+        <div className="flex-1 min-w-[160px] space-y-2">
+          <div className="bg-indigo-100 rounded-lg border-2 border-indigo-300 p-3 space-y-1">
+            <p className="text-[10px] font-bold text-indigo-500 uppercase">
+              {isPdAmend ? 'Proposed Amendments' : a.dual_zoning ? 'Proposed Zoning (1 of 2)' : 'Proposed Zoning'}
+            </p>
+            <p className="text-base font-black text-indigo-900 font-mono">{a.zoning_to_code}</p>
+            <p className="text-sm font-semibold text-indigo-800">{toInfo?.label || a.zoning_to_label}</p>
+            {(toInfo?.allows || (a.zoning_to_desc && a.zoning_to_desc !== a.zoning_to_label)) && (
+              <p className="text-xs text-indigo-600 leading-snug">{toInfo?.allows || a.zoning_to_desc}</p>
+            )}
+          </div>
+          {a.dual_zoning && a.zoning_to_code2 && (
+            <div className="bg-indigo-100 rounded-lg border-2 border-indigo-400 p-3 space-y-1">
+              <p className="text-[10px] font-bold text-indigo-600 uppercase">Proposed Zoning (2 of 2)</p>
+              <p className="text-base font-black text-indigo-900 font-mono">{a.zoning_to_code2}</p>
+              <p className="text-sm font-semibold text-indigo-800">{getZoneInfo(a.zoning_to_code2)?.label || a.zoning_to_label2}</p>
+              {a.zoning_to_desc2 && (
+                <p className="text-xs text-indigo-600 leading-snug">
+                  {getZoneInfo(a.zoning_to_code2)?.allows || a.zoning_to_desc2}
+                </p>
+              )}
+            </div>
           )}
         </div>
       </div>

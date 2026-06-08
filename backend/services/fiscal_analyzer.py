@@ -559,6 +559,22 @@ def _parse_zoning_request(text: str) -> Optional[dict]:
     to_code   = m.group(3).strip()
     to_desc   = m.group(4).strip().rstrip(";,")
 
+    # Detect dual-designation To: field — e.g. "AR" ... and "PD/I" ...
+    # Fort Worth sometimes rezones a parcel to two zones simultaneously.
+    # Pattern: the to_desc contains 'and "CODE"' or "and 'CODE'"
+    dual_match = re.search(
+        r'\band\s+' + _Q + r'([^"""'']+)' + _Q + r'\s*(.*?)(?=\s*(?:\(Recommended|site plan|Speaker|\Z))',
+        to_desc,
+        re.IGNORECASE | re.DOTALL,
+    )
+    to_code2 = None
+    to_desc2 = None
+    if dual_match:
+        to_code2 = dual_match.group(1).strip()
+        to_desc2 = dual_match.group(2).strip().rstrip(";,")
+        # Truncate to_desc at the " and " so each desc is clean
+        to_desc = to_desc[:dual_match.start()].strip().rstrip(";,")
+
     from_label = _fw_zone_label(from_code, from_desc)
     to_label   = _fw_zone_label(to_code, to_desc)
 
@@ -571,7 +587,7 @@ def _parse_zoning_request(text: str) -> Optional[dict]:
     if to_proto is None:
         to_proto = _classify_land_use("", to_desc) or "Unknown / Not Applicable"
 
-    return {
+    result = {
         "from_code":  from_code,
         "from_label": from_label,
         "from_desc":  from_desc[:200],
@@ -581,6 +597,20 @@ def _parse_zoning_request(text: str) -> Optional[dict]:
         "to_desc":    to_desc[:200],
         "to_proto":   to_proto,
     }
+
+    # Add second designation if present
+    if to_code2:
+        to_label2  = _fw_zone_label(to_code2, to_desc2 or "")
+        to_proto2  = _FW_ZONE_TO_PROTOTYPE.get(to_label2)
+        if to_proto2 is None:
+            to_proto2 = _classify_land_use("", to_desc2 or "") or "Unknown / Not Applicable"
+        result["to_code2"]   = to_code2
+        result["to_label2"]  = to_label2
+        result["to_desc2"]   = (to_desc2 or "")[:200]
+        result["to_proto2"]  = to_proto2
+        result["dual_zoning"] = True
+
+    return result
 
 
 def _assess_vacancy(text: str) -> tuple[str, str]:
@@ -793,6 +823,36 @@ def _enrich_zoning_analysis(result: dict, title: str, description: str, acreage:
     result["zoning_to_code"]    = zr["to_code"]
     result["zoning_to_label"]   = zr["to_label"]
     result["zoning_to_desc"]    = zr["to_desc"]
+
+    # Dual-designation zoning (e.g. To: "AR" and "PD/I")
+    if zr.get("dual_zoning"):
+        result["dual_zoning"]   = True
+        result["zoning_to_code2"]  = zr["to_code2"]
+        result["zoning_to_label2"] = zr["to_label2"]
+        result["zoning_to_desc2"]  = zr["to_desc2"]
+        result["zoning_to_proto2"] = zr["to_proto2"]
+        result["dual_zoning_note"] = (
+            f"This rezoning requests two simultaneous zoning designations: "
+            f"{zr['to_code']} ({zr['to_label']}) and {zr['to_code2']} ({zr['to_label2']}). "
+            f"The fiscal analysis below uses the more intensive designation ({zr['to_code2']}) "
+            f"as the basis for prototype estimates."
+        )
+        # Use the more intensive prototype for fiscal analysis
+        proto_rank = {
+            "Industrial / Warehouse": 5,
+            "Commercial Retail": 4,
+            "Mixed-Use": 3,
+            "Multifamily Residential": 2,
+            "Single-Family Residential": 1,
+            "Public / Institutional": 0,
+            "Open Space / Park": 0,
+        }
+        rank1 = proto_rank.get(zr["to_proto"], -1)
+        rank2 = proto_rank.get(zr["to_proto2"], -1)
+        if rank2 > rank1:
+            zr["to_proto"] = zr["to_proto2"]
+            zr["to_label"] = zr["to_label2"]
+            zr["to_code"]  = zr["to_code2"]
 
     # land_use_type must reflect the PROPOSED (to) zoning, not the keyword-matched
     # classification from the item title which may match the from zoning instead.
