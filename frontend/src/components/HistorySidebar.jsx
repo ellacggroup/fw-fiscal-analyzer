@@ -1,20 +1,26 @@
 import { useState } from 'react'
-import { FileText, Clock, RefreshCw, Layers, Search, X } from 'lucide-react'
+import { FileText, Clock, RefreshCw, Layers, Search, X, ArrowDownUp } from 'lucide-react'
 import { reanalyzeAgenda, reanalyzeAll } from '../services/api'
 
 export default function HistorySidebar({ agendas, currentId, onSelect, onReanalyzed }) {
   const [reanalyzing, setReanalyzing] = useState(null)
   const [reanalyzingAll, setReanalyzingAll] = useState(false)
   const [search, setSearch] = useState('')
+  const [sortDir, setSortDir] = useState('desc')   // 'desc' = newest first, 'asc' = oldest first
 
   if (!agendas.length) return null
 
-  const filtered = search.trim()
+  const filtered = (search.trim()
     ? agendas.filter(a =>
         (a.filename || '').toLowerCase().includes(search.toLowerCase()) ||
         (a.meeting_date || '').toLowerCase().includes(search.toLowerCase())
       )
-    : agendas
+    : [...agendas]
+  ).sort((a, b) => {
+    const da = new Date(a.uploaded_at)
+    const db = new Date(b.uploaded_at)
+    return sortDir === 'desc' ? db - da : da - db
+  })
 
   async function handleReanalyze(e, uploadId) {
     e.stopPropagation()
@@ -60,7 +66,7 @@ export default function HistorySidebar({ agendas, currentId, onSelect, onReanaly
       </div>
 
       {/* Search bar */}
-      <div className="relative mb-3">
+      <div className="relative mb-2">
         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
         <input
           type="text"
@@ -77,6 +83,19 @@ export default function HistorySidebar({ agendas, currentId, onSelect, onReanaly
             <X className="w-3.5 h-3.5" />
           </button>
         )}
+      </div>
+
+      {/* Sort toggle */}
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-xs text-gray-400">{filtered.length} agenda{filtered.length !== 1 ? 's' : ''}</span>
+        <button
+          onClick={() => setSortDir(d => d === 'desc' ? 'asc' : 'desc')}
+          className="flex items-center gap-1 text-xs text-gray-500 hover:text-fw-blue font-semibold transition-colors"
+          title={sortDir === 'desc' ? 'Showing newest first — click for oldest first' : 'Showing oldest first — click for newest first'}
+        >
+          <ArrowDownUp className="w-3 h-3" />
+          {sortDir === 'desc' ? 'Newest first' : 'Oldest first'}
+        </button>
       </div>
 
       <div className="space-y-2">
