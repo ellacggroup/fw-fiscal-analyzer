@@ -150,10 +150,12 @@ _CATEGORY_KEYWORDS = {
     ],
     "Economic Incentive": [
         "tax abatement", "abatement agreement", "chapter 380", "380 agreement",
-        "economic development agreement", "incentive agreement", "tirz",
-        "tax increment reinvestment zone", "tax increment financing",
+        "economic development agreement", "incentive agreement",
         "tax rebate agreement", "economic incentive", "business incentive",
         "enterprise zone", "eda agreement",
+        # Note: "tirz" and "tax increment reinvestment zone" intentionally omitted here —
+        # those terms appear in board appointment resolutions that are NOT economic deals.
+        # They are only caught via _is_economic_incentive() which applies proper exclusions.
     ],
     "Development Agreement": [
         "development agreement", "tax increment", "public improvement district",
@@ -270,6 +272,10 @@ def _extract_acreage(text: str) -> Optional[float]:
 # Classification helpers
 # ---------------------------------------------------------------------------
 def _classify_category(title: str, description: str) -> str:
+    # Board/officer appointments to TIF zones must never be classified as
+    # Economic Incentive — apply the same exclusion used in _is_economic_incentive.
+    if _INCENTIVE_EXCLUSION_RE.search(title + " " + description):
+        return "Other"
     text = (title + " " + description).lower()
     scores = {}
     for cat, keywords in _CATEGORY_KEYWORDS.items():
