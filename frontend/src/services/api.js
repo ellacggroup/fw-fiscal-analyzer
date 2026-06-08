@@ -50,3 +50,103 @@ export function exportExcelUrl(uploadId) {
 export function exportPdfUrl(uploadId) {
   return `/agendas/${uploadId}/export/pdf`
 }
+
+// ── Parcel lookup ────────────────────────────────────────────────────────────
+export async function lookupParcelsForAgenda(uploadId) {
+  const { data } = await api.post(`/parcels/agenda/${uploadId}`, {}, { timeout: 60_000 })
+  return data
+}
+export async function lookupParcelForItem(itemId) {
+  const { data } = await api.post(`/parcels/item/${itemId}`, {}, { timeout: 15_000 })
+  return data
+}
+export async function getParcelsForAgenda(uploadId) {
+  const { data } = await api.get(`/parcels/agenda/${uploadId}`)
+  return data
+}
+
+// ── Staff report upload ───────────────────────────────────────────────────────
+export async function uploadStaffReport(uploadId, file, itemNumber = '') {
+  const form = new FormData()
+  form.append('file', file)
+  if (itemNumber) form.append('item_number', itemNumber)
+  const { data } = await api.post(`/staff-reports/agenda/${uploadId}`, form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 30_000,
+  })
+  return data
+}
+
+// ── Alerts ────────────────────────────────────────────────────────────────────
+export async function listAlerts() {
+  const { data } = await api.get('/alerts/')
+  return data
+}
+export async function createAlert(label, alertType, criteria) {
+  const { data } = await api.post('/alerts/', { label, alert_type: alertType, criteria })
+  return data
+}
+export async function deleteAlert(id) {
+  const { data } = await api.delete(`/alerts/${id}`)
+  return data
+}
+export async function getAlertMatches(unreadOnly = false) {
+  const { data } = await api.get('/alerts/matches', { params: { unread_only: unreadOnly } })
+  return data
+}
+export async function getUnreadAlertCount() {
+  const { data } = await api.get('/alerts/matches/unread-count')
+  return data.unread || 0
+}
+export async function markAlertMatchRead(matchId) {
+  const { data } = await api.post(`/alerts/matches/${matchId}/read`)
+  return data
+}
+export async function markAllAlertsRead() {
+  const { data } = await api.post('/alerts/matches/read-all')
+  return data
+}
+
+// ── Analytics ─────────────────────────────────────────────────────────────────
+export async function getAnalyticsSummary() {
+  const { data } = await api.get('/analytics/summary')
+  return data
+}
+export async function getZoningActivity(params = {}) {
+  const { data } = await api.get('/analytics/zoning-activity', { params })
+  return data
+}
+export async function getTimeline() {
+  const { data } = await api.get('/analytics/timeline')
+  return data
+}
+export async function getIncentiveHistory() {
+  const { data } = await api.get('/analytics/economic-incentives')
+  return data
+}
+
+// ── Competitive intelligence ──────────────────────────────────────────────────
+export async function listWatchedProperties() {
+  const { data } = await api.get('/competitive/properties')
+  return data
+}
+export async function addWatchedProperty(label, address, radiusMiles = 1.0) {
+  const { data } = await api.post('/competitive/properties', { label, address, radius_miles: radiusMiles })
+  return data
+}
+export async function deleteWatchedProperty(id) {
+  const { data } = await api.delete(`/competitive/properties/${id}`)
+  return data
+}
+export async function getProximityAlerts(unreadOnly = false) {
+  const { data } = await api.get('/competitive/alerts', { params: { unread_only: unreadOnly } })
+  return data
+}
+export async function getUnreadProximityCount() {
+  const { data } = await api.get('/competitive/alerts/unread-count')
+  return data.unread || 0
+}
+export async function markProximityAlertRead(alertId) {
+  const { data } = await api.post(`/competitive/alerts/${alertId}/read`)
+  return data
+}

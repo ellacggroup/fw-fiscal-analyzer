@@ -1,9 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Building2, AlertCircle, FileSpreadsheet, FileDown, Sparkles } from 'lucide-react'
+import { Building2, AlertCircle, FileSpreadsheet, FileDown, Sparkles, Bell, BarChart2, MapPin, Upload } from 'lucide-react'
 import UploadZone from './components/UploadZone'
 import FiscalCard from './components/FiscalCard'
 import HistorySidebar from './components/HistorySidebar'
 import SummaryBar from './components/SummaryBar'
+import AlertsPanel from './components/AlertsPanel'
+import HistoryView from './components/HistoryView'
+import CompetitivePanel from './components/CompetitivePanel'
 import {
   uploadAndAnalyzeAgenda,
   uploadFromUrl,
@@ -11,6 +14,9 @@ import {
   listAgendas,
   exportExcelUrl,
   exportPdfUrl,
+  uploadStaffReport,
+  getUnreadAlertCount,
+  getUnreadProximityCount,
 } from './services/api'
 
 export default function App() {
@@ -20,6 +26,11 @@ export default function App() {
   const [currentAgenda, setCurrentAgenda] = useState(null)
   const [filterRating, setFilterRating] = useState('ALL')
   const [filterCategory, setFilterCategory] = useState('ALL')
+  const [mainTab, setMainTab] = useState('agenda')  // 'agenda' | 'alerts' | 'history' | 'competitive'
+  const [alertUnread, setAlertUnread] = useState(0)
+  const [proximityUnread, setProximityUnread] = useState(0)
+  const [staffReportUploading, setStaffReportUploading] = useState(false)
+  const [staffReportResult, setStaffReportResult] = useState(null)
 
   useEffect(() => {
     listAgendas()
@@ -30,6 +41,9 @@ export default function App() {
         setAgendaHistory(sorted)
       })
       .catch(() => {})
+    // Load unread badge counts
+    getUnreadAlertCount().then(setAlertUnread).catch(() => {})
+    getUnreadProximityCount().then(setProximityUnread).catch(() => {})
   }, [])
 
   const handleUpload = useCallback(async (file) => {
@@ -106,23 +120,61 @@ export default function App() {
             <h1 className="text-lg font-bold leading-tight">Fort Worth Fiscal Impact Analyzer</h1>
             <p className="text-xs text-blue-200">City Council Agenda Analysis · AI-Powered</p>
           </div>
+          {/* Navigation tabs */}
+          <nav className="flex gap-1">
+            {[
+              { key: 'agenda',      icon: Building2,  label: 'Agendas',     badge: 0 },
+              { key: 'history',     icon: BarChart2,  label: 'History',     badge: 0 },
+              { key: 'alerts',      icon: Bell,       label: 'Alerts',      badge: alertUnread },
+              { key: 'competitive', icon: MapPin,     label: 'Competitive', badge: proximityUnread },
+            ].map(({ key, icon: Icon, label, badge }) => (
+              <button key={key} onClick={() => setMainTab(key)}
+                className={`relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                  mainTab === key ? 'bg-white/20 text-white' : 'text-blue-200 hover:text-white hover:bg-white/10'
+                }`}>
+                <Icon className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">{label}</span>
+                {badge > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+                    {badge > 9 ? '9+' : badge}
+                  </span>
+                )}
+              </button>
+            ))}
+          </nav>
         </div>
       </header>
 
       {/* Main layout */}
       <div className="flex-1 max-w-7xl mx-auto w-full px-4 py-6 flex gap-6">
-        <HistorySidebar
-          agendas={agendaHistory}
-          currentId={currentAgenda?.upload_id}
-          onSelect={handleSelectHistory}
-          onReanalyzed={(result) => {
-            setCurrentAgenda(result)
-            setFilterRating('ALL')
-            setFilterCategory('ALL')
-          }}
-        />
+
+        {/* Sidebar — only shown on agenda tab */}
+        {mainTab === 'agenda' && (
+          <HistorySidebar
+            agendas={agendaHistory}
+            currentId={currentAgenda?.upload_id}
+            onSelect={handleSelectHistory}
+            onReanalyzed={(result) => {
+              setCurrentAgenda(result)
+              setFilterRating('ALL')
+              setFilterCategory('ALL')
+            }}
+          />
+        )}
 
         <main className="flex-1 min-w-0 space-y-6">
+
+        {/* Non-agenda tabs */}
+        {mainTab === 'history' && <HistoryView />}
+        {mainTab === 'alerts' && (
+          <AlertsPanel onUnreadChange={count => setAlertUnread(count)} />
+        )}
+        {mainTab === 'competitive' && (
+          <CompetitivePanel onUnreadChange={count => setProximityUnread(count)} />
+        )}
+
+        {/* Agenda tab content */}
+        {mainTab === 'agenda' && (<>
           <UploadZone
             onUpload={handleUpload}
             onUploadUrl={handleUploadUrl}
@@ -157,26 +209,59 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Export buttons */}
-                <div className="flex gap-2">
-                  <a
-                    href={exportExcelUrl(currentAgenda.upload_id)}
-                    download
-                    className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-green-600 text-green-700 hover:bg-green-50 font-semibold transition-colors"
-                  >
-                    <FileSpreadsheet className="w-4 h-4" />
-                    Excel
+                {/* Export + Staff Report buttons */}
+                <div className="flex gap-2 flex-wrap">
+                  <a href={exportExcelUrl(currentAgenda.upload_id)} download
+                    className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-green-600 text-green-700 hover:bg-green-50 font-semibold transition-colors">
+                    <FileSpreadsheet className="w-4 h-4" /> Excel
                   </a>
-                  <a
-                    href={exportPdfUrl(currentAgenda.upload_id)}
-                    download
-                    className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-red-600 text-red-700 hover:bg-red-50 font-semibold transition-colors"
-                  >
-                    <FileDown className="w-4 h-4" />
-                    PDF
+                  <a href={exportPdfUrl(currentAgenda.upload_id)} download
+                    className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-red-600 text-red-700 hover:bg-red-50 font-semibold transition-colors">
+                    <FileDown className="w-4 h-4" /> PDF
                   </a>
+                  <label className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-blue-600 text-blue-700 hover:bg-blue-50 font-semibold transition-colors cursor-pointer ${staffReportUploading ? 'opacity-50' : ''}`}>
+                    <Upload className="w-4 h-4" />
+                    {staffReportUploading ? 'Uploading…' : 'M&C Report'}
+                    <input type="file" accept=".pdf" className="hidden"
+                      disabled={staffReportUploading}
+                      onChange={async e => {
+                        const file = e.target.files[0]
+                        if (!file) return
+                        setStaffReportUploading(true)
+                        setStaffReportResult(null)
+                        try {
+                          const result = await uploadStaffReport(currentAgenda.upload_id, file)
+                          setStaffReportResult(result)
+                          if (result.matched_items > 0) {
+                            const refreshed = await getAgenda(currentAgenda.upload_id)
+                            setCurrentAgenda(refreshed)
+                          }
+                        } catch (err) {
+                          setStaffReportResult({ error: err.response?.data?.detail || 'Upload failed' })
+                        } finally {
+                          setStaffReportUploading(false)
+                          e.target.value = ''
+                        }
+                      }} />
+                  </label>
                 </div>
               </div>
+
+              {/* Staff report result */}
+              {staffReportResult && (
+                <div className={`rounded-xl border p-3 text-sm flex items-start gap-2 ${
+                  staffReportResult.error ? 'bg-red-50 border-red-200 text-red-800' : 'bg-blue-50 border-blue-200 text-blue-800'
+                }`}>
+                  <Upload className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                  <div>
+                    {staffReportResult.error
+                      ? staffReportResult.error
+                      : staffReportResult.matched_items > 0
+                        ? `M&C staff report applied to ${staffReportResult.matched_items} item(s). ${staffReportResult.mc_data?.mc_summary || ''}`
+                        : `Staff report parsed but no matching items found. ${staffReportResult.mc_data?.mc_summary || ''}`}
+                  </div>
+                </div>
+              )}
 
               <SummaryBar items={currentAgenda.items} />
 
@@ -269,6 +354,7 @@ export default function App() {
               </p>
             </div>
           )}
+        </>)}
         </main>
       </div>
     </div>

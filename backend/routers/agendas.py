@@ -8,6 +8,8 @@ from services.pdf_parser import detect_meeting_date, extract_agenda_items, extra
 from services.url_fetcher import fetch_pdf_from_url
 from services.comprehensive_plan import lookup_comprehensive_plan, is_real_estate_item
 from services.zoning_gis_lookup import extract_case_numbers, lookup_zoning_case
+from services.alert_matcher import run_alert_matching
+from services.proximity_matcher import run_proximity_matching
 
 router = APIRouter(prefix="/agendas", tags=["agendas"])
 
@@ -161,6 +163,16 @@ async def _process_pdf(
         db.commit()
         db.refresh(db_item)
         saved_items.append(db_item)
+
+    # Post-save hooks: alert matching and proximity matching
+    try:
+        run_alert_matching(upload.id, db)
+    except Exception:
+        pass
+    try:
+        run_proximity_matching(upload.id, db)
+    except Exception:
+        pass
 
     return {
         "upload_id": upload.id,

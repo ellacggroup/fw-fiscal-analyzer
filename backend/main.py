@@ -11,6 +11,11 @@ from fastapi.responses import FileResponse
 from database import init_db
 from routers import agendas
 from routers import export as export_router
+from routers import parcels as parcels_router
+from routers import staff_reports as staff_reports_router
+from routers import alerts as alerts_router
+from routers import analytics as analytics_router
+from routers import competitive as competitive_router
 from services.claude_analyzer import claude_available
 
 app = FastAPI(
@@ -33,6 +38,11 @@ app.add_middleware(
 
 app.include_router(agendas.router)
 app.include_router(export_router.router)
+app.include_router(parcels_router.router)
+app.include_router(staff_reports_router.router)
+app.include_router(alerts_router.router)
+app.include_router(analytics_router.router)
+app.include_router(competitive_router.router)
 
 
 @app.on_event("startup")
