@@ -13,7 +13,10 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-LEGISTAR_BASE = "https://webapi.legistar.com/v1/fortworthtx"
+# Fort Worth Legistar client — note: subdomain is fortworthgov.legistar.com,
+# so the webapi client name is "fortworthgov" (not fortworthtx).
+LEGISTAR_BASE = "https://webapi.legistar.com/v1/fortworthgov"
+CITY_COUNCIL_BODY_ID = 138   # confirmed: "CITY COUNCIL" BodyId in fortworthgov
 
 _HEADERS = {
     "User-Agent": (
@@ -33,20 +36,8 @@ def _get(url: str, params: dict = None, timeout: float = 30.0) -> list | dict:
 
 
 def get_city_council_body_id() -> Optional[int]:
-    """Return the Legistar BodyId for 'City Council'."""
-    try:
-        bodies = _get(f"{LEGISTAR_BASE}/Bodies")
-        for body in bodies:
-            name = (body.get("BodyName") or "").lower()
-            if name == "city council" or name == "fort worth city council":
-                return body["BodyId"]
-        # Fallback: first body with "council" in the name
-        for body in bodies:
-            if "council" in (body.get("BodyName") or "").lower():
-                return body["BodyId"]
-    except Exception as e:
-        logger.error(f"Legistar Bodies API error: {e}")
-    return None
+    """Return the Legistar BodyId for 'City Council'. Uses hardcoded value as fast path."""
+    return CITY_COUNCIL_BODY_ID
 
 
 def get_council_meetings(years: int = 5) -> list[dict]:
@@ -63,21 +54,17 @@ def get_council_meetings(years: int = 5) -> list[dict]:
             "body_name": "City Council",
         }
     """
-    body_id = get_city_council_body_id()
-    if body_id is None:
-        logger.error("Could not resolve City Council body ID from Legistar")
-        return []
-
     since = datetime.now() - timedelta(days=366 * years)
     since_str = since.strftime("%Y-%m-%dT00:00:00")
+    filt = f"EventBodyId eq {CITY_COUNCIL_BODY_ID} and EventDate ge datetime'{since_str}'"
 
     try:
         events = _get(
             f"{LEGISTAR_BASE}/Events",
             params={
-                "$filter": f"EventBodyId eq {body_id} and EventDate ge datetime'{since_str}'",
+                "$filter": filt,
                 "$orderby": "EventDate desc",
-                "$top": 600,
+                "$top": "600",
             },
             timeout=45.0,
         )
@@ -110,17 +97,14 @@ def get_council_meetings(years: int = 5) -> list[dict]:
 
 
 def _normalize_legistar_url(url: Optional[str]) -> Optional[str]:
-    """
-    Legistar may return relative or malformed URLs for PDF files.
-    Normalize them to absolute URLs, or return None if not usable.
-    """
+    """Ensure URL is absolute. Fort Worth PDFs are on fortworthgov.legistar1.com."""
     if not url:
         return None
     url = url.strip()
     if url.startswith("http://") or url.startswith("https://"):
         return url
     if url.startswith("/"):
-        return f"https://fortworthtexas.legistar.com{url}"
+        return f"https://fortworthgov.legistar.com{url}"
     return None
 
 
