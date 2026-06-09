@@ -156,6 +156,10 @@ export async function listBulkImportJobs() {
   const { data } = await api.get('/bulk-import/jobs')
   return data
 }
+export async function reprocessVotes() {
+  const { data } = await api.post('/bulk-import/reprocess-votes', {}, { timeout: 30_000 })
+  return data
+}
 
 // ── Competitive intelligence ──────────────────────────────────────────────────
 export async function listWatchedProperties() {

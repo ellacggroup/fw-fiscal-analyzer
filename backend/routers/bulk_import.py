@@ -22,9 +22,10 @@ from services.legistar_scraper import get_council_meetings, fetch_pdf_bytes_leni
 from services.pdf_parser import detect_meeting_date, extract_agenda_items, extract_text_from_pdf
 from services.fiscal_analyzer import analyze_fiscal_impact
 from services.claude_analyzer import analyze_items_with_claude, claude_available
-from services.vote_parser import associate_votes_to_items, summarize_votes
+from services.vote_parser import associate_votes_to_items, summarize_votes, extract_districts_from_ref
 from services.alert_matcher import run_alert_matching
 from services.proximity_matcher import run_proximity_matching
+from services.youtube_votes import get_youtube_votes_for_date
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/bulk-import", tags=["bulk-import"])
@@ -71,6 +72,25 @@ async def start_bulk_import(
 
     background_tasks.add_task(_run_import, job_id, years)
     return {"job_id": job_id, "status": "pending", "years": years}
+
+
+@router.post("/reprocess-votes")
+async def reprocess_votes(
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """
+    Re-run vote extraction on all imported agendas.
+    Re-downloads minutes PDFs and falls back to YouTube for meetings
+    without published minutes. Useful after fixing the vote parser.
+    """
+    job = BulkImportJob(status="pending", log=[])
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    job_id = job.id
+    background_tasks.add_task(_run_reprocess_votes, job_id)
+    return {"job_id": job_id, "status": "pending"}
 
 
 @router.get("/status/{job_id}")
@@ -158,7 +178,7 @@ def _run_import(job_id: int, years: int):
                     job.processed_agendas = (job.processed_agendas or 0) + 1
                     db.commit()
 
-            # Process minutes PDF (vote extraction)
+            # Process minutes PDF (vote extraction); fall back to YouTube
             if meeting.get("minutes_url"):
                 success = _process_minutes_url(
                     db, job, meeting["minutes_url"], date
@@ -166,6 +186,9 @@ def _run_import(job_id: int, years: int):
                 if success:
                     job.processed_minutes = (job.processed_minutes or 0) + 1
                     db.commit()
+            else:
+                # No minutes on Legistar yet — try YouTube transcript
+                _process_youtube_votes(db, job, date)
 
         _update_job(db, job, status="complete", completed_at=datetime.utcnow())
         _append_log(
@@ -186,6 +209,136 @@ def _run_import(job_id: int, years: int):
             pass
     finally:
         db.close()
+
+
+def _run_reprocess_votes(job_id: int):
+    """Re-run vote extraction on all imported agenda uploads."""
+    db = SessionLocal()
+    try:
+        job = db.query(BulkImportJob).filter(BulkImportJob.id == job_id).first()
+        if not job:
+            return
+        _update_job(db, job, status="running")
+        _append_log(db, job, "Re-processing vote data for all imported meetings...")
+
+        # Get all meetings with minutes URLs from Legistar
+        meetings = get_council_meetings(years=5)
+        minutes_by_date = {
+            m["date"]: m["minutes_url"]
+            for m in meetings
+            if m.get("minutes_url")
+        }
+
+        uploads = (
+            db.query(AgendaUpload)
+            .filter(AgendaUpload.document_type == "agenda")
+            .order_by(AgendaUpload.meeting_date)
+            .all()
+        )
+        _update_job(db, job, total_meetings=len(uploads))
+        _append_log(db, job, f"Found {len(uploads)} agenda uploads to reprocess")
+
+        processed = 0
+        for upload in uploads:
+            date = upload.meeting_date or ""
+            minutes_url = minutes_by_date.get(date)
+
+            matched = 0
+            if minutes_url:
+                pdf_bytes = fetch_pdf_bytes_lenient(minutes_url)
+                if pdf_bytes:
+                    try:
+                        raw_text = extract_text_from_pdf(pdf_bytes)
+                        votes_by_ref = associate_votes_to_items(raw_text)
+                        items = db.query(AgendaItem).filter(AgendaItem.upload_id == upload.id).all()
+                        for item in items:
+                            item_refs = _extract_item_refs(item)
+                            for ref in item_refs:
+                                if ref in votes_by_ref:
+                                    vote_result = votes_by_ref[ref]
+                                    item.votes = summarize_votes(vote_result)
+                                    if not item.districts and vote_result.get("districts"):
+                                        item.districts = vote_result["districts"]
+                                    matched += 1
+                                    break
+                        db.commit()
+                        if matched:
+                            _append_log(db, job, f"  {date}: matched {matched} votes from PDF")
+                    except Exception as e:
+                        _append_log(db, job, f"  {date} minutes error: {e}")
+            else:
+                # Try YouTube
+                matched = _process_youtube_votes(db, job, date, upload_id=upload.id, quiet=True)
+
+            if matched:
+                processed += 1
+                job.processed_minutes = (job.processed_minutes or 0) + 1
+                db.commit()
+
+        _update_job(db, job, status="complete", completed_at=datetime.utcnow())
+        _append_log(db, job, f"Reprocess complete — {processed}/{len(uploads)} meetings got vote data")
+    except Exception as e:
+        logger.exception(f"Reprocess job {job_id} failed")
+        try:
+            job = db.query(BulkImportJob).filter(BulkImportJob.id == job_id).first()
+            if job:
+                _update_job(db, job, status="error", completed_at=datetime.utcnow())
+                _append_log(db, job, f"FATAL ERROR: {e}")
+        except Exception:
+            pass
+    finally:
+        db.close()
+
+
+def _process_youtube_votes(
+    db: Session,
+    job: BulkImportJob,
+    date: str,
+    upload_id: int = None,
+    quiet: bool = False,
+) -> int:
+    """
+    Try to get vote data from YouTube for a meeting date.
+    Returns number of items matched.
+    """
+    try:
+        votes_by_ref = get_youtube_votes_for_date(date)
+        if not votes_by_ref:
+            return 0
+
+        if not upload_id:
+            upload = (
+                db.query(AgendaUpload)
+                .filter(
+                    AgendaUpload.meeting_date == date,
+                    AgendaUpload.document_type == "agenda",
+                )
+                .first()
+            )
+            if not upload:
+                return 0
+            upload_id = upload.id
+
+        items = db.query(AgendaItem).filter(AgendaItem.upload_id == upload_id).all()
+        matched = 0
+        for item in items:
+            item_refs = _extract_item_refs(item)
+            for ref in item_refs:
+                if ref in votes_by_ref:
+                    vote_result = votes_by_ref[ref]
+                    item.votes = summarize_votes(vote_result)
+                    if not item.districts and vote_result.get("districts"):
+                        item.districts = vote_result["districts"]
+                    matched += 1
+                    break
+        db.commit()
+        if matched and not quiet:
+            _append_log(db, job, f"  {date}: matched {matched} votes from YouTube")
+        return matched
+    except Exception as e:
+        if not quiet:
+            _append_log(db, job, f"  {date} YouTube vote error: {e}")
+        return 0
 
 
 def _process_agenda_url(
@@ -267,6 +420,9 @@ def _process_agenda_url(
 
         for item_data, analysis in relevant_pairs:
             cat = _infer_category(analysis, item_data.get("section", ""))
+            # Extract council districts from case ref inline annotations
+            item_text = f"{item_data.get('item_number', '')} {item_data.get('title', '')} {item_data.get('description', '')}"
+            item_districts = _extract_districts_from_text(item_text)
             db_item = AgendaItem(
                 upload_id=upload.id,
                 item_number=item_data.get("item_number"),
@@ -275,6 +431,7 @@ def _process_agenda_url(
                 section=item_data.get("section", ""),
                 category=cat,
                 analysis=analysis,
+                districts=item_districts or None,
             )
             db.add(db_item)
         db.commit()
@@ -360,7 +517,11 @@ def _process_minutes_url(
             item_refs = _extract_item_refs(item)
             for ref in item_refs:
                 if ref in votes_by_ref:
-                    item.votes = summarize_votes(votes_by_ref[ref])
+                    vote_result = votes_by_ref[ref]
+                    item.votes = summarize_votes(vote_result)
+                    # Backfill districts from vote record if not already set
+                    if not item.districts and vote_result.get("districts"):
+                        item.districts = vote_result["districts"]
                     db.commit()
                     matched += 1
                     break
@@ -393,6 +554,32 @@ def _extract_item_refs(item: AgendaItem) -> list[str]:
     )
     refs = [m.group(0).upper() for m in pattern.finditer(text)]
     return refs
+
+
+def _extract_districts_from_text(text: str) -> list[str]:
+    """
+    Pull all (CD X) and (ALL) district annotations from a text string.
+    Returns a deduplicated list like ["2", "9"] or ["ALL"].
+    """
+    import re
+    cd_re = re.compile(
+        r'\((?:Future\s+)?(?:(ALL)|(CD\s*\d+(?:\s+and\s+CD\s*\d+)*))\)',
+        re.IGNORECASE,
+    )
+    districts: list[str] = []
+    seen: set[str] = set()
+    for m in cd_re.finditer(text):
+        if m.group(1):
+            if "ALL" not in seen:
+                districts.append("ALL")
+                seen.add("ALL")
+        elif m.group(2):
+            nums = re.findall(r'\d+', m.group(2))
+            for n in nums:
+                if n not in seen:
+                    districts.append(n)
+                    seen.add(n)
+    return districts
 
 
 def _is_relevant(analysis: dict, item: dict) -> bool:

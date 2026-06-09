@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
-import { Download, CheckCircle, XCircle, Clock, RefreshCw, Play, FileText } from 'lucide-react'
-import { startBulkImport, getBulkImportStatus, listBulkImportJobs } from '../services/api'
+import { Download, CheckCircle, XCircle, Clock, RefreshCw, Play, FileText, RotateCcw } from 'lucide-react'
+import { startBulkImport, getBulkImportStatus, listBulkImportJobs, reprocessVotes } from '../services/api'
 
 const STATUS_ICON = {
   pending:  <Clock className="w-4 h-4 text-yellow-500" />,
@@ -59,6 +59,21 @@ export default function BulkImportPanel() {
     if (pollRef.current) {
       clearInterval(pollRef.current)
       pollRef.current = null
+    }
+  }
+
+  async function handleReprocess() {
+    setStarting(true)
+    setError(null)
+    try {
+      const job = await reprocessVotes()
+      setActiveJob(job)
+      setRecentJobs(prev => [job, ...prev.slice(0, 9)])
+      startPolling(job.job_id)
+    } catch (err) {
+      setError(err.response?.data?.detail || err.message || 'Failed to start reprocess')
+    } finally {
+      setStarting(false)
     }
   }
 
@@ -124,14 +139,27 @@ export default function BulkImportPanel() {
             <Play className="w-4 h-4" />
             {starting ? 'Starting…' : isRunning ? 'Import Running…' : 'Start Import'}
           </button>
+          <button
+            onClick={handleReprocess}
+            disabled={isRunning || starting}
+            title="Re-run vote extraction on all imported meetings (uses PDF minutes + YouTube fallback)"
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
+              isRunning || starting
+                ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                : 'bg-gray-700 text-white hover:bg-gray-900'
+            }`}
+          >
+            <RotateCcw className="w-4 h-4" />
+            Reprocess Votes
+          </button>
         </div>
 
         <div className="text-xs text-gray-400 space-y-1">
-          <p>• Fetches meeting list from <strong>fortworthtexas.legistar.com</strong> (public API)</p>
-          <p>• Downloads agenda PDFs and meeting minutes for each City Council meeting</p>
-          <p>• Extracts votes by district from meeting minutes</p>
+          <p>• Fetches meeting list from <strong>fortworthgov.legistar.com</strong> (public API)</p>
+          <p>• Downloads agenda PDFs and meeting minutes; extracts votes + council districts</p>
+          <p>• Falls back to <strong>YouTube transcripts</strong> for recent meetings without published minutes</p>
           <p>• Skips meetings already in the database</p>
-          <p>• Large imports (5 years ≈ 250 meetings) may take 20–40 minutes</p>
+          <p>• Use <strong>Reprocess Votes</strong> to re-run vote extraction on existing data after updates</p>
         </div>
 
         {error && (

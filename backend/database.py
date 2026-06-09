@@ -46,7 +46,8 @@ class AgendaItem(Base):
     section = Column(String, nullable=True)      # agenda section (Consent A, Zoning, etc.)
     category = Column(String, nullable=True)
     analysis = Column(JSON, nullable=True)       # merged rule-based + claude analysis
-    votes = Column(JSON, nullable=True)          # {ayes, nays, abstain, absent, passed, by_member}
+    votes = Column(JSON, nullable=True)          # {ayes, nays, abstain, absent, passed, by_member, districts}
+    districts = Column(JSON, nullable=True)      # ["2", "9"] or ["ALL"] — council districts affected
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -171,6 +172,7 @@ def _migrate_add_columns():
         for col, defn in [
             ("section", "TEXT"),
             ("votes", "JSON"),
+            ("districts", "JSON"),
         ]:
             if col not in items_cols:
                 conn.execute(sa.text(f"ALTER TABLE agenda_items ADD COLUMN {col} {defn}"))
