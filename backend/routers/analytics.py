@@ -123,6 +123,215 @@ def get_timeline(db: Session = Depends(get_db)):
     return sorted(by_date.values(), key=lambda x: x["meeting_date"] or "")
 
 
+@router.get("/zoning-transitions")
+def get_zoning_transitions(db: Session = Depends(get_db)):
+    """
+    Aggregate zoning change transitions — how many cases went from each
+    zone type to each other zone type, with total acreage and meeting dates.
+    Returns a list sorted by frequency.
+    """
+    items = (
+        db.query(AgendaItem, AgendaUpload)
+        .join(AgendaUpload, AgendaItem.upload_id == AgendaUpload.id)
+        .filter(AgendaItem.category == "Zoning Change")
+        .all()
+    )
+
+    # Map zone codes to broad land use categories for grouping
+    _ZONE_CATEGORY = {
+        # Single-family residential
+        "A-5": "Single-Family Residential", "A-10": "Single-Family Residential",
+        "A-21": "Single-Family Residential", "A-43": "Single-Family Residential",
+        "AR":   "Agricultural Residential",  "GR":   "Single-Family Residential",
+        # Agricultural / open
+        "AG":  "Agricultural",  "AN": "Agricultural",  "O-1": "Open Space / Floodplain",
+        # Multifamily
+        "B": "Two-Family Residential", "C": "Low-Rise Multifamily",
+        "D": "High-Density Multifamily", "D-HR": "High-Density Multifamily",
+        "UR": "Urban Residential", "R1": "Cluster Residential",
+        # Commercial
+        "E":  "Neighborhood Commercial",  "ER": "Neighborhood Commercial Restricted",
+        "F":  "General Commercial",       "FR": "General Commercial Restricted",
+        "G":  "Intensive Commercial",     "H":  "Central Business District",
+        "NS": "Neighborhood Service",
+        # Industrial
+        "I": "Light Industrial", "J": "Medium Industrial", "K": "Heavy Industrial",
+        # Institutional / mixed
+        "CF": "Community Facilities",
+        "MU-1": "Mixed-Use", "MU-2": "Mixed-Use", "MU": "Mixed-Use",
+    }
+
+    def _categorize(code: str) -> str:
+        if not code:
+            return "Unknown"
+        clean = code.strip().upper().split("/")[0]
+        if clean in _ZONE_CATEGORY:
+            return _ZONE_CATEGORY[clean]
+        if clean.startswith("PD"):
+            return "Planned Development"
+        if clean.startswith("TL-"):
+            return "Trinity Lakes District"
+        if clean.startswith("SY-"):
+            return "Stockyards District"
+        return clean
+
+    transitions: dict[str, dict] = {}
+
+    for item, upload in items:
+        analysis = item.analysis or {}
+        from_code = analysis.get("zoning_from_code") or ""
+        to_code   = analysis.get("zoning_to_code")   or ""
+        to_code2  = analysis.get("zoning_to_code2")  or ""
+        acreage   = analysis.get("acreage_estimate")  or 0
+        date      = upload.meeting_date or ""
+
+        if not from_code or not to_code:
+            continue
+
+        # Primary transition
+        for tc in filter(None, [to_code, to_code2 or None]):
+            from_cat = _categorize(from_code)
+            to_cat   = _categorize(tc)
+            key      = f"{from_code} → {tc}"
+            cat_key  = f"{from_cat} → {to_cat}"
+
+            if key not in transitions:
+                transitions[key] = {
+                    "from_code":     from_code,
+                    "to_code":       tc,
+                    "from_category": from_cat,
+                    "to_category":   to_cat,
+                    "category_key":  cat_key,
+                    "count":         0,
+                    "total_acres":   0.0,
+                    "meetings":      set(),
+                    "districts":     set(),
+                }
+            transitions[key]["count"]       += 1
+            transitions[key]["total_acres"] += acreage or 0
+            if date:
+                transitions[key]["meetings"].add(date)
+            district = _extract_district(item.title or "", item.description or "")
+            if district:
+                transitions[key]["districts"].add(district)
+
+    results = []
+    for t in transitions.values():
+        results.append({
+            "from_code":     t["from_code"],
+            "to_code":       t["to_code"],
+            "from_category": t["from_category"],
+            "to_category":   t["to_category"],
+            "category_key":  t["category_key"],
+            "count":         t["count"],
+            "total_acres":   round(t["total_acres"], 2),
+            "meeting_dates": sorted(t["meetings"]),
+            "districts":     sorted(t["districts"], key=lambda x: int(x) if x.isdigit() else 99),
+        })
+
+    results.sort(key=lambda x: -x["count"])
+    return {"total_transitions": len(results), "transitions": results}
+
+
+@router.get("/land-use-trends")
+def get_land_use_trends(db: Session = Depends(get_db)):
+    """
+    Aggregate zoning changes by broad land use category transition over time.
+    Shows how many acres moved from one use type to another per meeting date.
+    """
+    items = (
+        db.query(AgendaItem, AgendaUpload)
+        .join(AgendaUpload, AgendaItem.upload_id == AgendaUpload.id)
+        .filter(AgendaItem.category == "Zoning Change")
+        .all()
+    )
+
+    _BROAD = {
+        "Single-Family Residential": "Residential",
+        "Agricultural Residential":  "Residential",
+        "Two-Family Residential":    "Residential",
+        "Low-Rise Multifamily":      "Residential",
+        "High-Density Multifamily":  "Residential",
+        "Urban Residential":         "Residential",
+        "Cluster Residential":       "Residential",
+        "Neighborhood Commercial":   "Commercial",
+        "Neighborhood Commercial Restricted": "Commercial",
+        "General Commercial":        "Commercial",
+        "General Commercial Restricted": "Commercial",
+        "Intensive Commercial":      "Commercial",
+        "Central Business District": "Commercial",
+        "Neighborhood Service":      "Commercial",
+        "Mixed-Use":                 "Mixed-Use",
+        "Trinity Lakes District":    "Mixed-Use",
+        "Stockyards District":       "Mixed-Use",
+        "Light Industrial":          "Industrial",
+        "Medium Industrial":         "Industrial",
+        "Heavy Industrial":          "Industrial",
+        "Planned Development":       "Planned Development",
+        "Community Facilities":      "Institutional / CF",
+        "Agricultural":              "Agricultural / Open",
+        "Agricultural / Natural":    "Agricultural / Open",
+        "Open Space / Floodplain":   "Agricultural / Open",
+        "Unknown":                   "Other",
+    }
+
+    _ZONE_CATEGORY = {
+        "A-5": "Residential", "A-10": "Residential", "A-21": "Residential",
+        "A-43": "Residential", "AR": "Residential", "GR": "Residential",
+        "AG": "Agricultural / Open", "AN": "Agricultural / Open", "O-1": "Agricultural / Open",
+        "B": "Residential", "C": "Residential", "D": "Residential",
+        "D-HR": "Residential", "UR": "Residential", "R1": "Residential",
+        "E": "Commercial", "ER": "Commercial", "F": "Commercial",
+        "FR": "Commercial", "G": "Commercial", "H": "Commercial", "NS": "Commercial",
+        "I": "Industrial", "J": "Industrial", "K": "Industrial",
+        "CF": "Institutional / CF",
+        "MU-1": "Mixed-Use", "MU-2": "Mixed-Use", "MU": "Mixed-Use",
+    }
+
+    def _broad(code: str) -> str:
+        if not code:
+            return "Other"
+        clean = code.strip().upper().split("/")[0]
+        if clean in _ZONE_CATEGORY:
+            return _ZONE_CATEGORY[clean]
+        if clean.startswith("PD"):
+            return "Planned Development"
+        return "Other"
+
+    by_date: dict[str, dict] = {}
+
+    for item, upload in items:
+        analysis = item.analysis or {}
+        from_code = analysis.get("zoning_from_code") or ""
+        to_code   = analysis.get("zoning_to_code")   or ""
+        acreage   = analysis.get("acreage_estimate")  or 0
+        date      = upload.meeting_date or "Unknown"
+
+        if not from_code or not to_code or not acreage:
+            continue
+
+        from_broad = _broad(from_code)
+        to_broad   = _broad(to_code)
+        key        = f"{from_broad} → {to_broad}"
+
+        if date not in by_date:
+            by_date[date] = {}
+        by_date[date][key] = by_date[date].get(key, 0) + acreage
+
+    # Build sorted output
+    all_keys = sorted({k for d in by_date.values() for k in d})
+    dates = sorted(by_date.keys())
+
+    rows = []
+    for date in dates:
+        row = {"meeting_date": date}
+        for k in all_keys:
+            row[k] = round(by_date[date].get(k, 0), 2)
+        rows.append(row)
+
+    return {"dates": dates, "transition_types": all_keys, "by_date": rows}
+
+
 @router.get("/economic-incentives")
 def get_incentive_history(db: Session = Depends(get_db)):
     """All economic incentive deals across all agendas."""
