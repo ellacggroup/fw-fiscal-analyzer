@@ -14,8 +14,6 @@ import re
 from datetime import datetime
 from typing import Optional
 
-import httpx
-
 logger = logging.getLogger(__name__)
 
 _PLAYLIST_ID = "PL6sptIzJVcmpBFr6cSdMRRpT2pV-Bie3c"
@@ -83,59 +81,56 @@ def _parse_number(s: str) -> int:
 
 def _get_video_list() -> list[dict]:
     """
-    Fetch Fort Worth council meeting video IDs + titles from YouTube.
-    Returns [{video_id, title, date_str}] sorted newest-first.
+    Fetch Fort Worth council meeting video IDs + titles using yt-dlp.
+    Returns [{video_id, title, date}] sorted newest-first.
     Only includes regular council meeting videos (not work sessions).
     """
+    try:
+        import yt_dlp
+    except ImportError:
+        logger.warning("yt-dlp not installed — cannot fetch YouTube video list")
+        return []
+
+    ydl_opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "extract_flat": True,
+        "playlist_items": "1-100",
+    }
+
     videos = []
-    seen: set[str] = set()
-
-    sources = [
-        f"https://www.youtube.com/playlist?list={_PLAYLIST_ID}",
-        f"https://www.youtube.com/{_CHANNEL_HANDLE}/videos",
-    ]
-
-    for url in sources:
-        try:
-            with httpx.Client(follow_redirects=True, timeout=30) as client:
-                resp = client.get(url, headers={
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                    "Accept-Language": "en-US,en;q=0.9",
-                })
-            if resp.status_code != 200:
-                continue
-
-            # Extract videoId entries
-            vid_positions = [(m.start(), m.group(1))
-                             for m in re.finditer(r'"videoId"\s*:\s*"([A-Za-z0-9_-]{11})"', resp.text)]
-
-            for pos, vid in vid_positions:
-                if vid in seen:
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(
+                f"https://www.youtube.com/playlist?list={_PLAYLIST_ID}",
+                download=False,
+            )
+            for entry in info.get("entries", []):
+                if not entry:
                     continue
-                # Find nearest title text
-                window = resp.text[pos:pos + 600]
-                title_m = re.search(r'"text"\s*:\s*"([^"]{10,120})"', window)
-                if not title_m:
+                title = entry.get("title", "")
+                vid   = entry.get("id", "")
+                if not title or not vid:
                     continue
-                title = title_m.group(1)
 
-                # Only regular council meetings (skip work sessions, retreats, public comment)
-                if not re.search(r'city\s+council\s+meeting', title, re.IGNORECASE):
+                # Regular council meetings only
+                if not re.search(r"city\s+council\s+meeting", title, re.IGNORECASE):
                     continue
-                if re.search(r'work\s+session|retreat|public\s+comment|budget|canvass', title, re.IGNORECASE):
+                if re.search(
+                    r"work\s+session|retreat|public\s+comment|budget|canvass",
+                    title, re.IGNORECASE,
+                ):
                     continue
 
                 date_str = _date_from_title(title)
                 if not date_str:
                     continue
 
-                seen.add(vid)
                 videos.append({"video_id": vid, "title": title, "date": date_str})
 
-        except Exception as e:
-            logger.warning(f"Failed to fetch YouTube video list from {url}: {e}")
+    except Exception as e:
+        logger.warning(f"yt-dlp playlist fetch failed: {e}")
 
-    # Sort newest first
     videos.sort(key=lambda v: v["date"], reverse=True)
     logger.info(f"Found {len(videos)} council meeting videos on YouTube")
     return videos
