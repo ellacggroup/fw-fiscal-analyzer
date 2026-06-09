@@ -223,11 +223,22 @@ def _run_reprocess_votes(job_id: int):
 
         # Get all meetings with minutes URLs from Legistar
         meetings = get_council_meetings(years=5)
-        minutes_by_date = {
-            m["date"]: m["minutes_url"]
-            for m in meetings
-            if m.get("minutes_url")
-        }
+        # Index by both ISO date ("2026-06-09") and human-readable ("June 9, 2026")
+        minutes_by_date: dict[str, str] = {}
+        for m in meetings:
+            if not m.get("minutes_url"):
+                continue
+            iso_date = m["date"]  # "2026-06-09"
+            minutes_by_date[iso_date] = m["minutes_url"]
+            # Also index human-readable forms the PDF parser may produce
+            try:
+                from datetime import datetime as _dt
+                dt = _dt.strptime(iso_date, "%Y-%m-%d")
+                # "June 9, 2026" — lstrip removes leading zero on day
+                human = f"{dt.strftime('%B')} {dt.day}, {dt.year}"
+                minutes_by_date[human] = m["minutes_url"]
+            except Exception:
+                pass
 
         uploads = (
             db.query(AgendaUpload)
@@ -238,6 +249,8 @@ def _run_reprocess_votes(job_id: int):
         _update_job(db, job, total_meetings=len(uploads))
         _append_log(db, job, f"Found {len(uploads)} agenda uploads to reprocess")
 
+        _append_log(db, job, f"Minutes index has {len(minutes_by_date)} entries")
+
         processed = 0
         for upload in uploads:
             date = upload.meeting_date or ""
@@ -246,28 +259,34 @@ def _run_reprocess_votes(job_id: int):
             matched = 0
             if minutes_url:
                 pdf_bytes = fetch_pdf_bytes_lenient(minutes_url)
-                if pdf_bytes:
-                    try:
-                        raw_text = extract_text_from_pdf(pdf_bytes)
-                        votes_by_ref = associate_votes_to_items(raw_text)
-                        items = db.query(AgendaItem).filter(AgendaItem.upload_id == upload.id).all()
-                        for item in items:
-                            item_refs = _extract_item_refs(item)
-                            for ref in item_refs:
-                                if ref in votes_by_ref:
-                                    vote_result = votes_by_ref[ref]
-                                    item.votes = summarize_votes(vote_result)
-                                    if not item.districts and vote_result.get("districts"):
-                                        item.districts = vote_result["districts"]
-                                    matched += 1
-                                    break
-                        db.commit()
-                        if matched:
-                            _append_log(db, job, f"  {date}: matched {matched} votes from PDF")
-                    except Exception as e:
-                        _append_log(db, job, f"  {date} minutes error: {e}")
+                if not pdf_bytes:
+                    _append_log(db, job, f"  {date}: could not download minutes PDF")
+                    continue
+                try:
+                    raw_text = extract_text_from_pdf(pdf_bytes)
+                    votes_by_ref = associate_votes_to_items(raw_text)
+                    items = db.query(AgendaItem).filter(AgendaItem.upload_id == upload.id).all()
+                    # Log first item's refs vs first vote key for debugging
+                    if items and votes_by_ref:
+                        sample_refs = _extract_item_refs(items[0])[:3]
+                        sample_keys = list(votes_by_ref.keys())[:3]
+                        _append_log(db, job, f"  {date}: {len(votes_by_ref)} vote refs, sample={sample_keys[:2]}, item refs={sample_refs[:2]}")
+                    for item in items:
+                        item_refs = _extract_item_refs(item)
+                        for ref in item_refs:
+                            if ref in votes_by_ref:
+                                vote_result = votes_by_ref[ref]
+                                item.votes = summarize_votes(vote_result)
+                                if not item.districts and vote_result.get("districts"):
+                                    item.districts = vote_result["districts"]
+                                matched += 1
+                                break
+                    db.commit()
+                    _append_log(db, job, f"  {date}: matched {matched}/{len(items)} votes")
+                except Exception as e:
+                    _append_log(db, job, f"  {date} minutes error: {e}")
             else:
-                # Try YouTube
+                _append_log(db, job, f"  {date}: no minutes URL (stored date not in index)")
                 matched = _process_youtube_votes(db, job, date, upload_id=upload.id, quiet=True)
 
             if matched:
@@ -537,22 +556,40 @@ def _process_minutes_url(
 
 
 def _extract_item_refs(item: AgendaItem) -> list[str]:
-    """Extract case/M&C numbers from an agenda item to match against vote records."""
+    """
+    Extract all candidate case refs from an agenda item.
+    Returns multiple key formats so we can match against whatever the vote
+    parser generates from the minutes PDF.
+    """
     import re
     text = f"{item.item_number or ''} {item.title or ''} {item.description or ''}"
-    pattern = re.compile(
-        r'\b(?:'
-        r'(?:M&?C)\s+(?:[A-Z]-\d{4,6}|\d{2}-\d{4,6})|'
-        r'ZC-\d{2}-\d{3,6}|'
-        r'SP-\d{2}-\d{3,6}|'
-        r'AX-\d{2}-\d{3,6}|'
-        r'FP-\d{2}-\d{3,6}|'
-        r'PP-\d{2}-\d{3,6}|'
-        r'RP-\d{2}-\d{3,6}'
-        r')',
-        re.IGNORECASE
-    )
-    refs = [m.group(0).upper() for m in pattern.finditer(text)]
+
+    refs: list[str] = []
+    seen: set[str] = set()
+
+    def add(r: str):
+        r = r.strip().upper()
+        # Normalize whitespace
+        r = re.sub(r'\s+', ' ', r)
+        if r and r not in seen:
+            seen.add(r)
+            refs.append(r)
+
+    # Explicit M&C + number: "M&C 26-0267"
+    for m in re.finditer(r'\bM&?C\s+([A-Z]-\d{4,6}|\d{2}-\d{4,6})', text, re.IGNORECASE):
+        add(f"M&C {m.group(1)}")
+
+    # Zoning/site plan case numbers: ZC-25-078, SP-23-009
+    for m in re.finditer(r'\b(ZC|SP|AX|FP|PP|RP|PD|CUP)-(\d{2})-(\d{3,6})', text, re.IGNORECASE):
+        add(m.group(0))
+
+    # Bare Legistar item IDs: 26-0267, 25-5257 — generate both bare and M&C forms
+    for m in re.finditer(r'\b(\d{2})-(\d{4,6})\b', text):
+        bare = f"{m.group(1)}-{m.group(2)}"
+        add(bare)
+        add(f"M&C {bare}")          # minutes may key it as "M&C 26-0267"
+        add(f"M&C  {bare}")         # double-space from PDF extraction artifact
+
     return refs
 
 
