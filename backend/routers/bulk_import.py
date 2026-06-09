@@ -107,6 +107,24 @@ def list_jobs(db: Session = Depends(get_db)):
     return [_serialize_job(j) for j in jobs]
 
 
+@router.post("/sync-youtube-votes")
+async def sync_youtube_votes_endpoint(
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """
+    Pull Fort Worth council meeting transcripts from YouTube and apply
+    vote pass/fail data to all imported agenda items that lack vote data.
+    Covers recent meetings where Legistar minutes aren't published yet.
+    """
+    job = BulkImportJob(status="pending", log=[])
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    background_tasks.add_task(_run_youtube_vote_sync, job.id)
+    return {"job_id": job.id, "status": "pending"}
+
+
 # ── Background task ───────────────────────────────────────────────────────────
 
 def _serialize_job(job: BulkImportJob) -> dict:
@@ -211,6 +229,103 @@ def _run_import(job_id: int, years: int):
         db.close()
 
 
+def _run_youtube_vote_sync(job_id: int):
+    """Fetch YouTube transcripts and apply vote data to imported agenda items."""
+    from services.youtube_votes import sync_youtube_votes
+    db = SessionLocal()
+    try:
+        job = db.query(BulkImportJob).filter(BulkImportJob.id == job_id).first()
+        if not job:
+            return
+        _update_job(db, job, status="running")
+        _append_log(db, job, "Fetching Fort Worth council meeting videos from YouTube...")
+
+        # Get all unique meeting dates that have imported agendas
+        uploads = (
+            db.query(AgendaUpload)
+            .filter(AgendaUpload.document_type == "agenda")
+            .all()
+        )
+        # Normalize stored dates to ISO
+        iso_dates = []
+        date_to_upload: dict[str, list] = {}
+        for upload in uploads:
+            iso = _normalize_date_to_iso(upload.meeting_date or "")
+            if iso:
+                iso_dates.append(iso)
+                date_to_upload.setdefault(iso, []).append(upload)
+
+        iso_dates = list(set(iso_dates))
+        _update_job(db, job, total_meetings=len(iso_dates))
+        _append_log(db, job, f"Looking for YouTube videos for {len(iso_dates)} meeting dates...")
+
+        # Batch-fetch all transcripts
+        all_votes = sync_youtube_votes(iso_dates)
+        _append_log(db, job, f"Got transcripts for {len(all_votes)} dates")
+
+        total_matched = 0
+        for iso_date, votes_by_ref in all_votes.items():
+            _append_log(db, job, f"  {iso_date}: {len(votes_by_ref)} vote refs from YouTube")
+            for upload in date_to_upload.get(iso_date, []):
+                items = db.query(AgendaItem).filter(AgendaItem.upload_id == upload.id).all()
+                matched = 0
+                for item in items:
+                    # Skip items that already have good PDF vote data
+                    if item.votes and item.votes.get("source") != "youtube":
+                        continue
+                    item_refs = _extract_item_refs(item)
+                    for ref in item_refs:
+                        if ref in votes_by_ref:
+                            item.votes = summarize_votes(votes_by_ref[ref])
+                            if not item.districts and votes_by_ref[ref].get("districts"):
+                                item.districts = votes_by_ref[ref]["districts"]
+                            matched += 1
+                            break
+                db.commit()
+                if matched:
+                    total_matched += matched
+                    job.processed_minutes = (job.processed_minutes or 0) + 1
+                    db.commit()
+                    _append_log(db, job, f"  {iso_date}: applied {matched}/{len(items)} votes")
+
+        _update_job(db, job, status="complete", completed_at=datetime.utcnow())
+        _append_log(db, job, f"YouTube sync complete — {total_matched} items got vote data across {len(all_votes)} meetings")
+
+    except Exception as e:
+        logger.exception(f"YouTube vote sync job {job_id} failed")
+        try:
+            job = db.query(BulkImportJob).filter(BulkImportJob.id == job_id).first()
+            if job:
+                _update_job(db, job, status="error", completed_at=datetime.utcnow())
+                _append_log(db, job, f"FATAL ERROR: {e}")
+        except Exception:
+            pass
+    finally:
+        db.close()
+
+
+def _normalize_date_to_iso(date_str: str) -> Optional[str]:
+    """Convert any stored date format to ISO YYYY-MM-DD."""
+    if not date_str:
+        return None
+    # Already ISO
+    if re.match(r'^\d{4}-\d{2}-\d{2}$', date_str):
+        return date_str
+    # "June 9, 2026" or "June 9 2026"
+    m = re.match(
+        r'^(January|February|March|April|May|June|July|August|September|October|November|December)'
+        r'\s+(\d{1,2}),?\s+(\d{4})$',
+        date_str.strip(), re.IGNORECASE,
+    )
+    if m:
+        try:
+            dt = datetime.strptime(f"{m.group(1)} {m.group(2)} {m.group(3)}", "%B %d %Y")
+            return dt.strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+    return None
+
+
 def _run_reprocess_votes(job_id: int):
     """Re-run vote extraction on all imported agenda uploads."""
     db = SessionLocal()
@@ -254,7 +369,12 @@ def _run_reprocess_votes(job_id: int):
         processed = 0
         for upload in uploads:
             date = upload.meeting_date or ""
+            # Try stored date as-is, then normalized to ISO
             minutes_url = minutes_by_date.get(date)
+            if not minutes_url:
+                iso = _normalize_date_to_iso(date)
+                if iso:
+                    minutes_url = minutes_by_date.get(iso)
 
             matched = 0
             if minutes_url:

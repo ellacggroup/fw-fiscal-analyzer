@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
-import { Download, CheckCircle, XCircle, Clock, RefreshCw, Play, FileText, RotateCcw } from 'lucide-react'
-import { startBulkImport, getBulkImportStatus, listBulkImportJobs, reprocessVotes } from '../services/api'
+import { Download, CheckCircle, XCircle, Clock, RefreshCw, Play, FileText, RotateCcw, Youtube } from 'lucide-react'
+import { startBulkImport, getBulkImportStatus, listBulkImportJobs, reprocessVotes, syncYouTubeVotes } from '../services/api'
 
 const STATUS_ICON = {
   pending:  <Clock className="w-4 h-4 text-yellow-500" />,
@@ -59,6 +59,21 @@ export default function BulkImportPanel() {
     if (pollRef.current) {
       clearInterval(pollRef.current)
       pollRef.current = null
+    }
+  }
+
+  async function handleYouTubeSync() {
+    setStarting(true)
+    setError(null)
+    try {
+      const job = await syncYouTubeVotes()
+      setActiveJob(job)
+      setRecentJobs(prev => [job, ...prev.slice(0, 9)])
+      startPolling(job.job_id)
+    } catch (err) {
+      setError(err.response?.data?.detail || err.message || 'Failed to start YouTube sync')
+    } finally {
+      setStarting(false)
     }
   }
 
@@ -142,7 +157,7 @@ export default function BulkImportPanel() {
           <button
             onClick={handleReprocess}
             disabled={isRunning || starting}
-            title="Re-run vote extraction on all imported meetings (uses PDF minutes + YouTube fallback)"
+            title="Re-run vote extraction on all imported meetings using PDF minutes"
             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
               isRunning || starting
                 ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
@@ -151,6 +166,19 @@ export default function BulkImportPanel() {
           >
             <RotateCcw className="w-4 h-4" />
             Reprocess Votes
+          </button>
+          <button
+            onClick={handleYouTubeSync}
+            disabled={isRunning || starting}
+            title="Pull vote pass/fail data from Fort Worth YouTube meeting transcripts (covers recent meetings)"
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
+              isRunning || starting
+                ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                : 'bg-red-600 text-white hover:bg-red-700'
+            }`}
+          >
+            <Youtube className="w-4 h-4" />
+            YouTube Vote Sync
           </button>
         </div>
 
