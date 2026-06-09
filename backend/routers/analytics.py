@@ -332,15 +332,22 @@ def get_land_use_trends(db: Session = Depends(get_db)):
     return {"dates": dates, "transition_types": all_keys, "by_date": rows}
 
 
-# Categories we surface in the 5-year trend view
+# All categories that affect real estate / real estate development
 _TREND_CATEGORIES = {
     "Zoning Change",
-    "Economic Incentive",
     "Site Plan / Plat",
     "Platting",
-    "Impact / Development Fees",
     "Land Use / Comp Plan",
+    "Economic Incentive",
     "Development Agreement",
+    "TIRZ / Tax Increment",
+    "Public Improvement District",
+    "Impact / Development Fees",
+    "Annexation",
+    "Right-of-Way / Easement",
+    "Land Acquisition / Disposition",
+    "Utility Extension / Infrastructure",
+    "Development Code / Standards",
 }
 
 

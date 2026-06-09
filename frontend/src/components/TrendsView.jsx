@@ -6,13 +6,24 @@ import {
 } from '../services/api'
 
 const CATEGORY_COLORS = {
-  'Zoning Change':            '#2563eb',
-  'Economic Incentive':       '#16a34a',
-  'Site Plan / Plat':         '#9333ea',
-  'Platting':                 '#db2777',
-  'Impact / Development Fees':'#d97706',
-  'Land Use / Comp Plan':     '#0891b2',
-  'Development Agreement':    '#64748b',
+  // Core development approvals
+  'Zoning Change':                 '#2563eb',
+  'Site Plan / Plat':              '#7c3aed',
+  'Platting':                      '#db2777',
+  'Land Use / Comp Plan':          '#0891b2',
+  // Financial tools
+  'Economic Incentive':            '#16a34a',
+  'Development Agreement':         '#15803d',
+  'TIRZ / Tax Increment':          '#065f46',
+  'Public Improvement District':   '#0d9488',
+  'Impact / Development Fees':     '#d97706',
+  // Property & infrastructure
+  'Annexation':                    '#dc2626',
+  'Right-of-Way / Easement':       '#9a3412',
+  'Land Acquisition / Disposition':'#78350f',
+  'Utility Extension / Infrastructure': '#1d4ed8',
+  // Regulatory
+  'Development Code / Standards':  '#64748b',
 }
 
 const VOTE_COLORS = {

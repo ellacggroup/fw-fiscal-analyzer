@@ -250,15 +250,26 @@ export default function BulkImportPanel() {
       <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-800 space-y-1">
         <p className="font-semibold">What gets imported</p>
         <p>Only items in these categories are saved to the database:</p>
-        <ul className="list-disc list-inside ml-2 space-y-0.5 text-blue-700">
-          <li>Zoning Changes (ZC cases)</li>
-          <li>Economic Incentives (Chapter 380, tax abatements)</li>
-          <li>Site Plans (SP cases)</li>
-          <li>Platting (final/preliminary plats)</li>
-          <li>Land Use / Comprehensive Plan amendments</li>
-          <li>Impact & Development Fees</li>
-          <li>Development Agreements</li>
-        </ul>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 mt-1">
+          <ul className="list-disc list-inside ml-2 space-y-0.5 text-blue-700">
+            <li>Zoning Changes (ZC cases)</li>
+            <li>Site Plans (SP cases)</li>
+            <li>Platting (final/preliminary plats)</li>
+            <li>Land Use / Comp Plan amendments</li>
+            <li>Economic Incentives (Ch. 380, abatements)</li>
+            <li>Development Agreements</li>
+            <li>TIRZ / Tax Increment Financing</li>
+          </ul>
+          <ul className="list-disc list-inside ml-2 space-y-0.5 text-blue-700">
+            <li>Public Improvement Districts (PIDs)</li>
+            <li>Impact & Development Fees</li>
+            <li>Annexation</li>
+            <li>Right-of-Way & Easement actions</li>
+            <li>City Land Acquisition / Disposition</li>
+            <li>Utility Extensions (water/sewer)</li>
+            <li>Development Code / Standards changes</li>
+          </ul>
+        </div>
         <p className="mt-2 text-blue-600 text-xs">
           Votes are extracted from meeting minutes and linked to each case.
           After import, visit the <strong>Trends</strong> tab to analyze 5-year patterns.

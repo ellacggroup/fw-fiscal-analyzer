@@ -29,15 +29,26 @@ from services.proximity_matcher import run_proximity_matching
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/bulk-import", tags=["bulk-import"])
 
-# ── Target categories we care about ──────────────────────────────────────────
+# ── Target categories — all items that affect real estate or RE development ───
 RELEVANT_CATEGORIES = {
+    # Core development approvals
     "Zoning Change",
-    "Economic Incentive",
     "Site Plan / Plat",
-    "Impact / Development Fees",
-    "Land Use / Comp Plan",
-    "Development Agreement",
     "Platting",
+    "Land Use / Comp Plan",
+    # Financial tools
+    "Economic Incentive",
+    "Development Agreement",
+    "TIRZ / Tax Increment",
+    "Public Improvement District",
+    "Impact / Development Fees",
+    # Property and infrastructure
+    "Annexation",
+    "Right-of-Way / Easement",
+    "Land Acquisition / Disposition",
+    "Utility Extension / Infrastructure",
+    # Regulatory
+    "Development Code / Standards",
 }
 
 
