@@ -1,14 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Building2, AlertCircle, FileSpreadsheet, FileDown, Sparkles, Bell, BarChart2, MapPin, Upload, TrendingUp, Download } from 'lucide-react'
+import { Building2, AlertCircle, FileSpreadsheet, FileDown, Sparkles, Bell, MapPin, Upload, TrendingUp } from 'lucide-react'
 import UploadZone from './components/UploadZone'
 import FiscalCard from './components/FiscalCard'
 import HistorySidebar from './components/HistorySidebar'
 import SummaryBar from './components/SummaryBar'
 import AlertsPanel from './components/AlertsPanel'
-import HistoryView from './components/HistoryView'
 import CompetitivePanel from './components/CompetitivePanel'
 import TrendsView from './components/TrendsView'
-import BulkImportPanel from './components/BulkImportPanel'
 import {
   uploadAndAnalyzeAgenda,
   uploadFromUrl,
@@ -28,7 +26,7 @@ export default function App() {
   const [currentAgenda, setCurrentAgenda] = useState(null)
   const [filterRating, setFilterRating] = useState('ALL')
   const [filterCategory, setFilterCategory] = useState('ALL')
-  const [mainTab, setMainTab] = useState('agenda')  // 'agenda' | 'alerts' | 'history' | 'competitive' | 'trends' | 'import'
+  const [mainTab, setMainTab] = useState('agenda')  // 'agenda' | 'alerts' | 'competitive' | 'trends'
   const [alertUnread, setAlertUnread] = useState(0)
   const [proximityUnread, setProximityUnread] = useState(0)
   const [staffReportUploading, setStaffReportUploading] = useState(false)
@@ -127,8 +125,6 @@ export default function App() {
             {[
               { key: 'agenda',      icon: Building2,  label: 'Agendas',     badge: 0 },
               { key: 'trends',      icon: TrendingUp, label: 'Trends',      badge: 0 },
-              { key: 'import',      icon: Download,   label: 'Import',      badge: 0 },
-              { key: 'history',     icon: BarChart2,  label: 'History',     badge: 0 },
               { key: 'alerts',      icon: Bell,       label: 'Alerts',      badge: alertUnread },
               { key: 'competitive', icon: MapPin,     label: 'Competitive', badge: proximityUnread },
             ].map(({ key, icon: Icon, label, badge }) => (
@@ -170,8 +166,6 @@ export default function App() {
 
         {/* Non-agenda tabs */}
         {mainTab === 'trends' && <TrendsView />}
-        {mainTab === 'import' && <BulkImportPanel />}
-        {mainTab === 'history' && <HistoryView />}
         {mainTab === 'alerts' && (
           <AlertsPanel onUnreadChange={count => setAlertUnread(count)} />
         )}

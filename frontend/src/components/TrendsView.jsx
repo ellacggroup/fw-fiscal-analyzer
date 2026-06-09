@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react'
-import { TrendingUp, Users, BarChart2, FileText, Filter } from 'lucide-react'
+import { TrendingUp, Users, BarChart2, FileText, Filter, Clock, Download } from 'lucide-react'
 import {
   getCategoryTrends, getVotesByMember, getAnalyticsSummary,
   getZoningActivity, getIncentiveHistory,
 } from '../services/api'
+import HistoryView from './HistoryView'
+import BulkImportPanel from './BulkImportPanel'
 
 const CATEGORY_COLORS = {
   // Core development approvals
@@ -334,10 +336,12 @@ export default function TrendsView() {
       <div className="border-b border-gray-200">
         <nav className="flex gap-0 -mb-px">
           {[
-            { key: 'overview',   label: 'Category Trends', icon: BarChart2 },
-            { key: 'votes',      label: 'Council Votes',   icon: Users     },
-            { key: 'zoning',     label: 'Zoning Cases',    icon: FileText  },
-            { key: 'incentives', label: 'Incentives',      icon: TrendingUp},
+            { key: 'overview',   label: 'Category Trends', icon: BarChart2  },
+            { key: 'votes',      label: 'Council Votes',   icon: Users      },
+            { key: 'zoning',     label: 'Zoning Cases',    icon: FileText   },
+            { key: 'incentives', label: 'Incentives',      icon: TrendingUp },
+            { key: 'history',    label: 'History',         icon: Clock      },
+            { key: 'import',     label: 'Import',          icon: Download   },
           ].map(({ key, label, icon: Icon }) => (
             <button
               key={key}
@@ -482,6 +486,9 @@ export default function TrendsView() {
           )}
         </div>
       )}
+
+      {tab === 'history' && <HistoryView />}
+      {tab === 'import' && <BulkImportPanel />}
     </div>
   )
 }
