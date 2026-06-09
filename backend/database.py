@@ -32,6 +32,7 @@ class AgendaUpload(Base):
     uploaded_at = Column(DateTime, default=datetime.utcnow)
     item_count = Column(Integer, default=0)
     raw_text = Column(Text, nullable=True)
+    document_type = Column(String, nullable=True, default="agenda")  # "agenda" | "minutes"
 
 
 class AgendaItem(Base):
@@ -45,6 +46,7 @@ class AgendaItem(Base):
     section = Column(String, nullable=True)      # agenda section (Consent A, Zoning, etc.)
     category = Column(String, nullable=True)
     analysis = Column(JSON, nullable=True)       # merged rule-based + claude analysis
+    votes = Column(JSON, nullable=True)          # {ayes, nays, abstain, absent, passed, by_member}
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -115,6 +117,21 @@ class ProximityAlert(Base):
     is_read              = Column(Boolean, default=False)
 
 
+class BulkImportJob(Base):
+    __tablename__ = "bulk_import_jobs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    started_at = Column(DateTime, default=datetime.utcnow)
+    completed_at = Column(DateTime, nullable=True)
+    status = Column(String, default="pending")      # pending | running | complete | error
+    total_meetings = Column(Integer, default=0)
+    processed_agendas = Column(Integer, default=0)
+    processed_minutes = Column(Integer, default=0)
+    skipped = Column(Integer, default=0)
+    errors = Column(Integer, default=0)
+    log = Column(JSON, nullable=True)               # list of status message strings
+
+
 def get_db():
     db = SessionLocal()
     try:
@@ -130,34 +147,31 @@ def init_db():
 
 def _migrate_add_columns():
     """
-    Add columns introduced in v3 to an existing database without dropping data.
+    Add columns introduced in later versions to an existing database without dropping data.
     SQLite requires ALTER TABLE for each new column individually.
     """
+    sa = __import__("sqlalchemy")
     with engine.connect() as conn:
-        existing = {
+        uploads_cols = {
             row[1]
-            for row in conn.execute(
-                __import__("sqlalchemy").text("PRAGMA table_info(agenda_uploads)")
-            )
+            for row in conn.execute(sa.text("PRAGMA table_info(agenda_uploads)"))
         }
-        if "source_url" not in existing:
-            conn.execute(
-                __import__("sqlalchemy").text(
-                    "ALTER TABLE agenda_uploads ADD COLUMN source_url TEXT"
-                )
-            )
-            conn.commit()
+        for col, defn in [
+            ("source_url", "TEXT"),
+            ("document_type", "TEXT DEFAULT 'agenda'"),
+        ]:
+            if col not in uploads_cols:
+                conn.execute(sa.text(f"ALTER TABLE agenda_uploads ADD COLUMN {col} {defn}"))
+                conn.commit()
 
-        existing_items = {
+        items_cols = {
             row[1]
-            for row in conn.execute(
-                __import__("sqlalchemy").text("PRAGMA table_info(agenda_items)")
-            )
+            for row in conn.execute(sa.text("PRAGMA table_info(agenda_items)"))
         }
-        if "section" not in existing_items:
-            conn.execute(
-                __import__("sqlalchemy").text(
-                    "ALTER TABLE agenda_items ADD COLUMN section TEXT"
-                )
-            )
-            conn.commit()
+        for col, defn in [
+            ("section", "TEXT"),
+            ("votes", "JSON"),
+        ]:
+            if col not in items_cols:
+                conn.execute(sa.text(f"ALTER TABLE agenda_items ADD COLUMN {col} {defn}"))
+                conn.commit()

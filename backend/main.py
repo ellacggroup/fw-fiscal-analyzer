@@ -16,6 +16,7 @@ from routers import staff_reports as staff_reports_router
 from routers import alerts as alerts_router
 from routers import analytics as analytics_router
 from routers import competitive as competitive_router
+from routers import bulk_import as bulk_import_router
 from services.claude_analyzer import claude_available
 
 app = FastAPI(
@@ -43,6 +44,7 @@ app.include_router(staff_reports_router.router)
 app.include_router(alerts_router.router)
 app.include_router(analytics_router.router)
 app.include_router(competitive_router.router)
+app.include_router(bulk_import_router.router)
 
 
 @app.on_event("startup")

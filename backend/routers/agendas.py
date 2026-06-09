@@ -394,6 +394,7 @@ def _serialize(item: AgendaItem) -> dict:
         "section": item.section or "",
         "category": item.category,
         "analysis": item.analysis,
+        "votes": item.votes,
     }
 
 

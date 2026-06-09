@@ -162,8 +162,23 @@ _CATEGORY_KEYWORDS = {
         "pid", "economic development",
     ],
     "Site Plan / Plat": [
-        "site plan", "sp-", "final plat", "preliminary plat", "replat",
-        "subdivision", "vacate", "right-of-way dedication",
+        "site plan", "sp-",
+        "vacate", "right-of-way dedication",
+    ],
+    "Platting": [
+        "final plat", "preliminary plat", "replat", "fp-", "pp-", "rp-",
+        "subdivision plat", "minor plat", "amending plat", "vacating plat",
+    ],
+    "Impact / Development Fees": [
+        "impact fee", "development fee", "connection fee", "tap fee",
+        "fee schedule", "water impact", "wastewater impact", "transportation impact",
+        "roadway impact", "parkland dedication", "park fee",
+        "infrastructure fee", "capital recovery fee",
+    ],
+    "Land Use / Comp Plan": [
+        "future land use", "flum", "comprehensive plan amendment",
+        "land use amendment", "comp plan", "general plan amendment",
+        "mixed use overlay", "urban design district",
     ],
     "Contract / Procurement": [
         "authorize", "authorizing", "award", "contract", "purchase",

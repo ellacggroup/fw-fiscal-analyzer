@@ -125,6 +125,38 @@ export async function getIncentiveHistory() {
   return data
 }
 
+// ── Analytics ─────────────────────────────────────────────────────────────────
+export async function getCategoryTrends() {
+  const { data } = await api.get('/analytics/category-trends')
+  return data
+}
+export async function getVotesByMember(category = '') {
+  const { data } = await api.get('/analytics/votes-by-member', { params: category ? { category } : {} })
+  return data
+}
+export async function getZoningTransitions() {
+  const { data } = await api.get('/analytics/zoning-transitions')
+  return data
+}
+export async function getVotesTimeline() {
+  const { data } = await api.get('/analytics/votes-timeline')
+  return data
+}
+
+// ── Bulk import ───────────────────────────────────────────────────────────────
+export async function startBulkImport(years = 5) {
+  const { data } = await api.post('/bulk-import/start', { years }, { timeout: 30_000 })
+  return data
+}
+export async function getBulkImportStatus(jobId) {
+  const { data } = await api.get(`/bulk-import/status/${jobId}`)
+  return data
+}
+export async function listBulkImportJobs() {
+  const { data } = await api.get('/bulk-import/jobs')
+  return data
+}
+
 // ── Competitive intelligence ──────────────────────────────────────────────────
 export async function listWatchedProperties() {
   const { data } = await api.get('/competitive/properties')

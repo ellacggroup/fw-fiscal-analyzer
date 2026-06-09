@@ -332,6 +332,160 @@ def get_land_use_trends(db: Session = Depends(get_db)):
     return {"dates": dates, "transition_types": all_keys, "by_date": rows}
 
 
+# Categories we surface in the 5-year trend view
+_TREND_CATEGORIES = {
+    "Zoning Change",
+    "Economic Incentive",
+    "Site Plan / Plat",
+    "Platting",
+    "Impact / Development Fees",
+    "Land Use / Comp Plan",
+    "Development Agreement",
+}
+
+
+@router.get("/category-trends")
+def get_category_trends(db: Session = Depends(get_db)):
+    """
+    Return item counts per relevant category per calendar quarter
+    for the past 5 years. Used for the Trends view.
+    """
+    rows = (
+        db.query(AgendaItem, AgendaUpload)
+        .join(AgendaUpload, AgendaItem.upload_id == AgendaUpload.id)
+        .filter(AgendaItem.category.in_(_TREND_CATEGORIES))
+        .all()
+    )
+
+    # Group by quarter + category
+    by_quarter: dict[str, dict[str, int]] = {}
+    for item, upload in rows:
+        date = upload.meeting_date or ""
+        if not date:
+            continue
+        # Parse date to quarter string like "2023-Q2"
+        try:
+            parts = date.replace(",", "").split()
+            if len(parts) == 3:
+                # "January 16, 2024" or already numeric
+                from datetime import datetime as dt
+                d = dt.strptime(date.replace(",", ""), "%B %d %Y")
+            else:
+                d = dt.fromisoformat(date[:10])
+            quarter = f"{d.year}-Q{(d.month - 1) // 3 + 1}"
+        except Exception:
+            quarter = date[:7]  # fallback: YYYY-MM
+
+        cat = item.category or "Other"
+        if quarter not in by_quarter:
+            by_quarter[quarter] = {}
+        by_quarter[quarter][cat] = by_quarter[quarter].get(cat, 0) + 1
+
+    quarters_sorted = sorted(by_quarter.keys())
+    all_cats = sorted(_TREND_CATEGORIES)
+
+    rows_out = []
+    for q in quarters_sorted:
+        row = {"quarter": q}
+        for cat in all_cats:
+            row[cat] = by_quarter[q].get(cat, 0)
+        row["total"] = sum(by_quarter[q].values())
+        rows_out.append(row)
+
+    return {
+        "quarters": quarters_sorted,
+        "categories": all_cats,
+        "by_quarter": rows_out,
+    }
+
+
+@router.get("/votes-by-member")
+def get_votes_by_member(
+    category: str = "",
+    db: Session = Depends(get_db),
+):
+    """
+    Aggregate vote records by councilmember across all stored items.
+    Optionally filter by category.
+    Returns vote totals per member.
+    """
+    query = (
+        db.query(AgendaItem, AgendaUpload)
+        .join(AgendaUpload, AgendaItem.upload_id == AgendaUpload.id)
+        .filter(AgendaItem.votes.isnot(None))
+    )
+    if category:
+        query = query.filter(AgendaItem.category == category)
+    rows = query.all()
+
+    # Aggregate: {name+district → {AYE, NAY, ABSTAIN, ABSENT, items}}
+    member_stats: dict[str, dict] = {}
+
+    for item, upload in rows:
+        votes_data = item.votes or {}
+        by_member = votes_data.get("by_member") or []
+        for vote_rec in by_member:
+            name = vote_rec.get("name", "Unknown")
+            district = vote_rec.get("district", "")
+            vote_type = vote_rec.get("vote", "")
+            key = f"{name}|{district}"
+
+            if key not in member_stats:
+                member_stats[key] = {
+                    "name": name,
+                    "district": district,
+                    "AYE": 0,
+                    "NAY": 0,
+                    "ABSTAIN": 0,
+                    "ABSENT": 0,
+                    "items": 0,
+                }
+            member_stats[key][vote_type] = member_stats[key].get(vote_type, 0) + 1
+            member_stats[key]["items"] += 1
+
+    results = sorted(
+        member_stats.values(),
+        key=lambda x: (
+            int(x["district"]) if x["district"].isdigit() else 0,
+            x["name"],
+        ),
+    )
+
+    return {"total_items_with_votes": len(rows), "members": results}
+
+
+@router.get("/votes-timeline")
+def get_votes_timeline(db: Session = Depends(get_db)):
+    """
+    Return vote outcomes (passed/failed) over time for relevant categories.
+    """
+    rows = (
+        db.query(AgendaItem, AgendaUpload)
+        .join(AgendaUpload, AgendaItem.upload_id == AgendaUpload.id)
+        .filter(
+            AgendaItem.category.in_(_TREND_CATEGORIES),
+            AgendaItem.votes.isnot(None),
+        )
+        .all()
+    )
+
+    by_date: dict[str, dict] = {}
+    for item, upload in rows:
+        date = upload.meeting_date or "Unknown"
+        votes = item.votes or {}
+        passed = votes.get("passed", None)
+
+        if date not in by_date:
+            by_date[date] = {"meeting_date": date, "passed": 0, "failed": 0, "total": 0}
+        if passed is True:
+            by_date[date]["passed"] += 1
+        elif passed is False:
+            by_date[date]["failed"] += 1
+        by_date[date]["total"] += 1
+
+    return sorted(by_date.values(), key=lambda x: x["meeting_date"] or "")
+
+
 @router.get("/economic-incentives")
 def get_incentive_history(db: Session = Depends(get_db)):
     """All economic incentive deals across all agendas."""
