@@ -139,6 +139,20 @@ def _lookup_district(name: str, member_map: dict = None) -> str:
     return _MEMBER_DISTRICT.get(last, "")
 
 
+def _normalize_name(name: str) -> str:
+    """Strip middle initials and resolve to canonical member name by last name."""
+    # Strip middle initials like "M." in "Elizabeth M. Beck"
+    stripped = re.sub(r'\b[A-Z]\.\s+', '', name).strip()
+    lower = stripped.lower()
+    # Look up canonical full name by last name
+    last = lower.split()[-1] if lower.split() else lower
+    full = next(
+        (k for k in _MEMBER_DISTRICT if ' ' in k and k.split()[-1] == last),
+        None,
+    )
+    return full.title() if full else stripped
+
+
 def _extract_names_from_list(raw: str) -> list[str]:
     """Parse 'Mayor Parker, Mayor Pro tem Flores, and Council Members Crain, Hill' → names."""
     cleaned = _PREFIX_RE.sub('', raw).strip()
@@ -149,13 +163,7 @@ def _extract_names_from_list(raw: str) -> list[str]:
         p = re.sub(r'^\s*and\s+', '', p, flags=re.IGNORECASE).strip()
         p = _PREFIX_RE.sub('', p).strip()
         if len(p) >= 2 and p.lower() not in ('', 'the', 'a', 'an'):
-            # Resolve to full name via member table
-            lower = p.lower()
-            full = next(
-                (k for k in _MEMBER_DISTRICT if ' ' in k and k.split()[-1] == lower.split()[-1]),
-                None,
-            )
-            names.append(full.title() if full else p)
+            names.append(_normalize_name(p))
     return names
 
 

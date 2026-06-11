@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from database import AgendaItem, AgendaUpload, get_db
+from services.vote_parser import _normalize_name
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -432,7 +433,8 @@ def get_votes_by_member(
         votes_data = item.votes or {}
         by_member = votes_data.get("by_member") or []
         for vote_rec in by_member:
-            name = vote_rec.get("name", "Unknown")
+            raw_name = vote_rec.get("name", "Unknown")
+            name = _normalize_name(raw_name) if raw_name != "Unknown" else raw_name
             district = vote_rec.get("district", "")
             vote_type = vote_rec.get("vote", "")
             key = f"{name}|{district}"
