@@ -121,7 +121,149 @@ function BarChart({ data, categories }) {
   )
 }
 
-// ── Item drill-down panel ─────────────────────────────────────────────────────
+const VOTE_PILL = {
+  AYE:     'bg-green-100 text-green-700 border-green-200',
+  NAY:     'bg-red-100 text-red-700 border-red-200',
+  ABSTAIN: 'bg-yellow-100 text-yellow-700 border-yellow-200',
+  ABSENT:  'bg-gray-100 text-gray-500 border-gray-200',
+}
+const VOTE_LABEL = { AYE: 'Aye', NAY: 'Nay', ABSTAIN: 'Abstain', ABSENT: 'Absent' }
+
+function ItemRow({ item, showVote }) {
+  return (
+    <div className="px-5 py-3.5 hover:bg-gray-50 transition-colors">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            {showVote && item.vote && (
+              <span className={`text-xs px-1.5 py-0.5 rounded border font-semibold flex-shrink-0 ${VOTE_PILL[item.vote] || ''}`}>
+                {VOTE_LABEL[item.vote] || item.vote}
+              </span>
+            )}
+            <p className="text-sm font-medium text-gray-900 leading-snug">{item.title || '(no title)'}</p>
+          </div>
+          {item.summary && item.summary !== item.title && (
+            <p className="text-xs text-gray-500 mt-1 leading-relaxed line-clamp-2">{item.summary}</p>
+          )}
+        </div>
+        {item.fiscal_rating && (
+          <span className={`text-xs px-2 py-0.5 rounded-full font-semibold flex-shrink-0 ${
+            item.fiscal_rating === 'POSITIVE' ? 'bg-green-100 text-green-700' :
+            item.fiscal_rating === 'NEGATIVE' ? 'bg-red-100 text-red-700' :
+            'bg-gray-100 text-gray-600'
+          }`}>{item.fiscal_rating}</span>
+        )}
+      </div>
+      <div className="flex gap-3 mt-1.5 text-xs text-gray-400 flex-wrap">
+        {item.meeting_date && <span>{item.meeting_date}</span>}
+        {item.item_number && <span className="font-mono">{item.item_number}</span>}
+        {item.category && <span className="text-blue-500">{item.category}</span>}
+      </div>
+    </div>
+  )
+}
+
+// ── Member profile — click on name — all votes grouped by category ────────────
+function MemberProfile({ member, category: filterCategory, onClose, onDrillVote }) {
+  const [items, setItems] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [voteFilter, setVoteFilter] = useState('') // '' = all, 'AYE', 'NAY', etc.
+
+  useEffect(() => {
+    setLoading(true)
+    getMemberVoteItems(member.name, '', filterCategory)
+      .then(d => setItems(d.items || []))
+      .catch(() => setItems([]))
+      .finally(() => setLoading(false))
+  }, [member.name, filterCategory])
+
+  const displayed = voteFilter ? (items || []).filter(i => i.vote === voteFilter) : (items || [])
+
+  // Group by category
+  const byCategory = {}
+  for (const item of displayed) {
+    const cat = item.category || 'Other'
+    if (!byCategory[cat]) byCategory[cat] = []
+    byCategory[cat].push(item)
+  }
+  const cats = Object.keys(byCategory).sort()
+
+  // Totals for filter chips
+  const totals = {}
+  for (const item of (items || [])) {
+    totals[item.vote] = (totals[item.vote] || 0) + 1
+  }
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="px-5 py-3.5 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-700 transition-colors">
+            <ChevronLeft className="w-5 h-5" />
+          </button>
+          <div>
+            <p className="font-semibold text-gray-900">
+              {member.name}
+              <span className="ml-2 text-xs text-gray-400 font-normal">District {member.district}</span>
+            </p>
+            <p className="text-xs text-gray-400 mt-0.5">
+              {filterCategory || 'All categories'}
+              {!loading && items && ` · ${displayed.length} item${displayed.length !== 1 ? 's' : ''}`}
+            </p>
+          </div>
+        </div>
+        <button onClick={onClose} className="text-gray-400 hover:text-gray-700"><X className="w-4 h-4" /></button>
+      </div>
+
+      {/* Vote type filter chips */}
+      {!loading && items && items.length > 0 && (
+        <div className="px-5 py-2.5 border-b border-gray-100 flex gap-2 flex-wrap">
+          <button
+            onClick={() => setVoteFilter('')}
+            className={`text-xs px-2.5 py-1 rounded-full border font-semibold transition-all ${
+              !voteFilter ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+            }`}
+          >
+            All ({items.length})
+          </button>
+          {['AYE', 'NAY', 'ABSTAIN', 'ABSENT'].filter(v => totals[v]).map(v => (
+            <button
+              key={v}
+              onClick={() => setVoteFilter(voteFilter === v ? '' : v)}
+              className={`text-xs px-2.5 py-1 rounded-full border font-semibold transition-all ${
+                voteFilter === v
+                  ? (VOTE_PILL[v] || '') + ' border-current'
+                  : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+              }`}
+            >
+              {VOTE_LABEL[v]} ({totals[v]})
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="max-h-[540px] overflow-y-auto">
+        {loading && <p className="text-sm text-gray-400 text-center py-10">Loading…</p>}
+        {!loading && displayed.length === 0 && <p className="text-sm text-gray-400 text-center py-10">No items found.</p>}
+        {!loading && cats.map(cat => (
+          <div key={cat}>
+            <div className="px-5 py-2 bg-gray-50 border-y border-gray-100 flex items-center justify-between sticky top-0 z-10">
+              <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">{cat}</span>
+              <span className="text-xs text-gray-400">{byCategory[cat].length} item{byCategory[cat].length !== 1 ? 's' : ''}</span>
+            </div>
+            <div className="divide-y divide-gray-100">
+              {byCategory[cat].map(item => (
+                <ItemRow key={item.item_id} item={item} showVote={!voteFilter} />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── Vote count drill-down — click AYE/NAY number ──────────────────────────────
 function VoteDrillDown({ member, voteType, category, onClose }) {
   const [items, setItems] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -135,11 +277,10 @@ function VoteDrillDown({ member, voteType, category, onClose }) {
   }, [member.name, voteType, category])
 
   const voteLabel = { AYE: 'Ayes', NAY: 'Nays', ABSTAIN: 'Abstentions', ABSENT: 'Absences' }[voteType] || voteType
-  const voteColor = { AYE: 'text-green-700 bg-green-50 border-green-200', NAY: 'text-red-700 bg-red-50 border-red-200', ABSTAIN: 'text-yellow-700 bg-yellow-50 border-yellow-200', ABSENT: 'text-gray-600 bg-gray-50 border-gray-200' }[voteType] || ''
+  const voteColor = VOTE_PILL[voteType] || ''
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-      {/* Header */}
       <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between bg-gray-50">
         <div className="flex items-center gap-3">
           <button onClick={onClose} className="text-gray-400 hover:text-gray-700 transition-colors">
@@ -153,55 +294,25 @@ function VoteDrillDown({ member, voteType, category, onClose }) {
               </span>
             </p>
             <p className="text-xs text-gray-400 mt-0.5">
-              District {member.district}{category ? ` · ${category}` : ' · All categories'}
+              District {member.district} · {category || 'All categories'}
               {!loading && items && ` · ${items.length} item${items.length !== 1 ? 's' : ''}`}
             </p>
           </div>
         </div>
-        <button onClick={onClose} className="text-gray-400 hover:text-gray-700">
-          <X className="w-4 h-4" />
-        </button>
+        <button onClick={onClose} className="text-gray-400 hover:text-gray-700"><X className="w-4 h-4" /></button>
       </div>
 
-      {/* Content */}
       <div className="divide-y divide-gray-100 max-h-[520px] overflow-y-auto">
-        {loading && (
-          <p className="text-sm text-gray-400 text-center py-10">Loading items…</p>
-        )}
-        {!loading && items?.length === 0 && (
-          <p className="text-sm text-gray-400 text-center py-10">No items found.</p>
-        )}
-        {!loading && items?.map(item => (
-          <div key={item.item_id} className="px-5 py-3.5 hover:bg-gray-50 transition-colors">
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-900 leading-snug">{item.title || '(no title)'}</p>
-                {item.summary && item.summary !== item.title && (
-                  <p className="text-xs text-gray-500 mt-1 leading-relaxed line-clamp-2">{item.summary}</p>
-                )}
-              </div>
-              {item.fiscal_rating && (
-                <span className={`text-xs px-2 py-0.5 rounded-full font-semibold flex-shrink-0 ${
-                  item.fiscal_rating === 'POSITIVE' ? 'bg-green-100 text-green-700' :
-                  item.fiscal_rating === 'NEGATIVE' ? 'bg-red-100 text-red-700' :
-                  'bg-gray-100 text-gray-600'
-                }`}>{item.fiscal_rating}</span>
-              )}
-            </div>
-            <div className="flex gap-3 mt-1.5 text-xs text-gray-400 flex-wrap">
-              {item.meeting_date && <span>{item.meeting_date}</span>}
-              {item.item_number && <span className="font-mono">{item.item_number}</span>}
-              {item.category && <span className="text-blue-500">{item.category}</span>}
-            </div>
-          </div>
-        ))}
+        {loading && <p className="text-sm text-gray-400 text-center py-10">Loading items…</p>}
+        {!loading && items?.length === 0 && <p className="text-sm text-gray-400 text-center py-10">No items found.</p>}
+        {!loading && items?.map(item => <ItemRow key={item.item_id} item={item} showVote={false} />)}
       </div>
     </div>
   )
 }
 
 // ── Vote breakdown table ──────────────────────────────────────────────────────
-function VotesTable({ members, loading, onDrill }) {
+function VotesTable({ members, loading, onDrill, onProfile }) {
   if (loading) return <p className="text-sm text-gray-400">Loading votes…</p>
   if (!members || members.length === 0) {
     return (
@@ -220,7 +331,7 @@ function VotesTable({ members, loading, onDrill }) {
         <button
           onClick={() => onDrill(member, voteType)}
           className={`${colorClass} font-semibold hover:underline cursor-pointer tabular-nums`}
-          title={`See ${value} ${voteType} vote${value !== 1 ? 's' : ''} for ${member.name}`}
+          title={`See ${value} ${voteType} votes for ${member.name}`}
         >
           {value}
         </button>
@@ -254,7 +365,15 @@ function VotesTable({ members, loading, onDrill }) {
                     {m.district || '?'}
                   </span>
                 </td>
-                <td className="px-4 py-2.5 font-medium text-gray-900">{m.name}</td>
+                <td className="px-4 py-2.5">
+                  <button
+                    onClick={() => onProfile(m)}
+                    className="font-medium text-gray-900 hover:text-fw-blue hover:underline text-left"
+                    title={`See all votes for ${m.name}`}
+                  >
+                    {m.name}
+                  </button>
+                </td>
                 <VoteCell member={m} voteType="AYE"     value={m.AYE}     colorClass="text-green-700" />
                 <VoteCell member={m} voteType="NAY"     value={m.NAY}     colorClass="text-red-600"   />
                 <VoteCell member={m} voteType="ABSTAIN" value={m.ABSTAIN} colorClass="text-yellow-600" />
@@ -273,7 +392,9 @@ function VotesTable({ members, loading, onDrill }) {
           })}
         </tbody>
       </table>
-      <p className="text-xs text-gray-400 px-4 py-2 border-t border-gray-100">Click any vote count to see the specific agenda items.</p>
+      <p className="text-xs text-gray-400 px-4 py-2 border-t border-gray-100">
+        Click a <span className="font-medium text-gray-600">name</span> to see all votes by category · click a <span className="font-medium text-gray-600">number</span> to see items for that vote type
+      </p>
     </div>
   )
 }
@@ -346,7 +467,8 @@ export default function TrendsView() {
   const [incentives, setIncentives] = useState([])
   const [loading, setLoading] = useState(true)
   const [voteCategory, setVoteCategory] = useState('')
-  const [drill, setDrill] = useState(null) // { member, voteType }
+  const [drill, setDrill] = useState(null)   // { member, voteType } — count click
+  const [profile, setProfile] = useState(null) // member — name click
 
   useEffect(() => {
     setLoading(true)
@@ -370,6 +492,7 @@ export default function TrendsView() {
   async function loadVotesForCategory(cat) {
     setVoteCategory(cat)
     setDrill(null)
+    setProfile(null)
     try {
       const data = await getVotesByMember(cat)
       setVotesData(data)
@@ -523,6 +646,12 @@ export default function TrendsView() {
               category={voteCategory}
               onClose={() => setDrill(null)}
             />
+          ) : profile ? (
+            <MemberProfile
+              member={profile}
+              category={voteCategory}
+              onClose={() => setProfile(null)}
+            />
           ) : (
             <>
               <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -540,7 +669,8 @@ export default function TrendsView() {
                 <VotesTable
                   members={votesData?.members}
                   loading={loading && !votesData}
-                  onDrill={(member, voteType) => setDrill({ member, voteType })}
+                  onDrill={(member, voteType) => { setProfile(null); setDrill({ member, voteType }) }}
+                  onProfile={(member) => { setDrill(null); setProfile(member) }}
                 />
               </div>
 

@@ -466,14 +466,14 @@ def get_votes_by_member(
 @router.get("/member-vote-items")
 def get_member_vote_items(
     name: str,
-    vote: str,
+    vote: str = "",
     category: str = "",
     db: Session = Depends(get_db),
 ):
     """
     Return the specific agenda items a council member voted a given way on.
     name: canonical member name (e.g. "Elizabeth Beck")
-    vote: AYE | NAY | ABSTAIN | ABSENT
+    vote: AYE | NAY | ABSTAIN | ABSENT — omit to return all vote types
     category: optional category filter
     """
     query = (
@@ -486,7 +486,7 @@ def get_member_vote_items(
     rows = query.all()
 
     name_lower = name.strip().lower()
-    vote_upper = vote.strip().upper()
+    vote_filter = vote.strip().upper() if vote.strip() else None
     results = []
 
     for item, upload in rows:
@@ -497,7 +497,8 @@ def get_member_vote_items(
             canonical = _normalize_name(raw_name) if raw_name != "Unknown" else raw_name
             if canonical.lower() != name_lower:
                 continue
-            if vote_rec.get("vote", "").upper() != vote_upper:
+            actual_vote = vote_rec.get("vote", "").upper()
+            if vote_filter and actual_vote != vote_filter:
                 continue
             analysis = item.analysis or {}
             results.append({
@@ -507,13 +508,14 @@ def get_member_vote_items(
                 "item_number":   item.item_number,
                 "title":         item.title or "",
                 "category":      item.category or "",
+                "vote":          actual_vote,
                 "fiscal_rating": analysis.get("fiscal_impact_rating"),
                 "summary":       (item.description or "")[:180] or (item.title or "")[:180],
             })
             break  # one vote per item per member
 
-    results.sort(key=lambda x: x["meeting_date"] or "", reverse=True)
-    return {"member": name, "vote": vote_upper, "total": len(results), "items": results}
+    results.sort(key=lambda x: (x["category"], x["meeting_date"] or ""), reverse=False)
+    return {"member": name, "vote": vote_filter or "ALL", "total": len(results), "items": results}
 
 
 @router.get("/votes-timeline")

@@ -142,8 +142,9 @@ export async function getVotesTimeline() {
   const { data } = await api.get('/analytics/votes-timeline')
   return data
 }
-export async function getMemberVoteItems(name, vote, category = '') {
-  const params = { name, vote }
+export async function getMemberVoteItems(name, vote = '', category = '') {
+  const params = { name }
+  if (vote) params.vote = vote
   if (category) params.category = category
   const { data } = await api.get('/analytics/member-vote-items', { params })
   return data
