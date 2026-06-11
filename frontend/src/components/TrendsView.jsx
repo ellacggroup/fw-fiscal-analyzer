@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
-import { TrendingUp, Users, BarChart2, FileText, Filter, Clock, Download } from 'lucide-react'
+import { TrendingUp, Users, BarChart2, FileText, Filter, Clock, Download, X, ChevronLeft } from 'lucide-react'
 import {
   getCategoryTrends, getVotesByMember, getAnalyticsSummary,
-  getZoningActivity, getIncentiveHistory,
+  getZoningActivity, getIncentiveHistory, getMemberVoteItems,
 } from '../services/api'
 import HistoryView from './HistoryView'
 import BulkImportPanel from './BulkImportPanel'
@@ -121,8 +121,87 @@ function BarChart({ data, categories }) {
   )
 }
 
+// ── Item drill-down panel ─────────────────────────────────────────────────────
+function VoteDrillDown({ member, voteType, category, onClose }) {
+  const [items, setItems] = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    setLoading(true)
+    getMemberVoteItems(member.name, voteType, category)
+      .then(d => setItems(d.items || []))
+      .catch(() => setItems([]))
+      .finally(() => setLoading(false))
+  }, [member.name, voteType, category])
+
+  const voteLabel = { AYE: 'Ayes', NAY: 'Nays', ABSTAIN: 'Abstentions', ABSENT: 'Absences' }[voteType] || voteType
+  const voteColor = { AYE: 'text-green-700 bg-green-50 border-green-200', NAY: 'text-red-700 bg-red-50 border-red-200', ABSTAIN: 'text-yellow-700 bg-yellow-50 border-yellow-200', ABSENT: 'text-gray-600 bg-gray-50 border-gray-200' }[voteType] || ''
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      {/* Header */}
+      <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between bg-gray-50">
+        <div className="flex items-center gap-3">
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-700 transition-colors">
+            <ChevronLeft className="w-5 h-5" />
+          </button>
+          <div>
+            <p className="font-semibold text-gray-900">
+              {member.name}
+              <span className={`ml-2 text-xs px-2 py-0.5 rounded-full border font-semibold ${voteColor}`}>
+                {voteLabel}
+              </span>
+            </p>
+            <p className="text-xs text-gray-400 mt-0.5">
+              District {member.district}{category ? ` · ${category}` : ' · All categories'}
+              {!loading && items && ` · ${items.length} item${items.length !== 1 ? 's' : ''}`}
+            </p>
+          </div>
+        </div>
+        <button onClick={onClose} className="text-gray-400 hover:text-gray-700">
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* Content */}
+      <div className="divide-y divide-gray-100 max-h-[520px] overflow-y-auto">
+        {loading && (
+          <p className="text-sm text-gray-400 text-center py-10">Loading items…</p>
+        )}
+        {!loading && items?.length === 0 && (
+          <p className="text-sm text-gray-400 text-center py-10">No items found.</p>
+        )}
+        {!loading && items?.map(item => (
+          <div key={item.item_id} className="px-5 py-3.5 hover:bg-gray-50 transition-colors">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-gray-900 leading-snug">{item.title || '(no title)'}</p>
+                {item.summary && item.summary !== item.title && (
+                  <p className="text-xs text-gray-500 mt-1 leading-relaxed line-clamp-2">{item.summary}</p>
+                )}
+              </div>
+              {item.fiscal_rating && (
+                <span className={`text-xs px-2 py-0.5 rounded-full font-semibold flex-shrink-0 ${
+                  item.fiscal_rating === 'POSITIVE' ? 'bg-green-100 text-green-700' :
+                  item.fiscal_rating === 'NEGATIVE' ? 'bg-red-100 text-red-700' :
+                  'bg-gray-100 text-gray-600'
+                }`}>{item.fiscal_rating}</span>
+              )}
+            </div>
+            <div className="flex gap-3 mt-1.5 text-xs text-gray-400 flex-wrap">
+              {item.meeting_date && <span>{item.meeting_date}</span>}
+              {item.item_number && <span className="font-mono">{item.item_number}</span>}
+              {item.category && <span className="text-blue-500">{item.category}</span>}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ── Vote breakdown table ──────────────────────────────────────────────────────
-function VotesTable({ members, loading }) {
+function VotesTable({ members, loading, onDrill }) {
   if (loading) return <p className="text-sm text-gray-400">Loading votes…</p>
   if (!members || members.length === 0) {
     return (
@@ -131,6 +210,21 @@ function VotesTable({ members, loading }) {
         <p>No vote records found.</p>
         <p className="text-xs mt-1">Vote data is extracted from meeting minutes during bulk import.</p>
       </div>
+    )
+  }
+
+  function VoteCell({ member, voteType, value, colorClass }) {
+    if (!value) return <td className="px-4 py-2.5 text-right text-gray-300">0</td>
+    return (
+      <td className="px-4 py-2.5 text-right">
+        <button
+          onClick={() => onDrill(member, voteType)}
+          className={`${colorClass} font-semibold hover:underline cursor-pointer tabular-nums`}
+          title={`See ${value} ${voteType} vote${value !== 1 ? 's' : ''} for ${member.name}`}
+        >
+          {value}
+        </button>
+      </td>
     )
   }
 
@@ -152,7 +246,7 @@ function VotesTable({ members, loading }) {
         <tbody className="divide-y divide-gray-100">
           {members.map(m => {
             const total = (m.AYE || 0) + (m.NAY || 0) + (m.ABSTAIN || 0) + (m.ABSENT || 0)
-            const ayePct = pct(m.AYE || 0, total - (m.ABSENT || 0))  // exclude absents from aye rate
+            const ayePct = pct(m.AYE || 0, total - (m.ABSENT || 0))
             return (
               <tr key={`${m.name}-${m.district}`} className="hover:bg-gray-50">
                 <td className="px-4 py-2.5">
@@ -161,18 +255,15 @@ function VotesTable({ members, loading }) {
                   </span>
                 </td>
                 <td className="px-4 py-2.5 font-medium text-gray-900">{m.name}</td>
-                <td className="px-4 py-2.5 text-right text-green-700 font-semibold">{m.AYE || 0}</td>
-                <td className="px-4 py-2.5 text-right text-red-600">{m.NAY || 0}</td>
-                <td className="px-4 py-2.5 text-right text-yellow-600">{m.ABSTAIN || 0}</td>
-                <td className="px-4 py-2.5 text-right text-gray-400">{m.ABSENT || 0}</td>
+                <VoteCell member={m} voteType="AYE"     value={m.AYE}     colorClass="text-green-700" />
+                <VoteCell member={m} voteType="NAY"     value={m.NAY}     colorClass="text-red-600"   />
+                <VoteCell member={m} voteType="ABSTAIN" value={m.ABSTAIN} colorClass="text-yellow-600" />
+                <VoteCell member={m} voteType="ABSENT"  value={m.ABSENT}  colorClass="text-gray-400"  />
                 <td className="px-4 py-2.5 text-right text-gray-500">{total}</td>
                 <td className="px-4 py-2.5">
                   <div className="flex items-center gap-2">
                     <div className="flex-1 bg-gray-100 rounded-full h-2 min-w-16">
-                      <div
-                        className="bg-green-500 rounded-full h-2"
-                        style={{ width: `${ayePct}%` }}
-                      />
+                      <div className="bg-green-500 rounded-full h-2" style={{ width: `${ayePct}%` }} />
                     </div>
                     <span className="text-xs text-gray-500 w-8 text-right">{ayePct}%</span>
                   </div>
@@ -182,6 +273,7 @@ function VotesTable({ members, loading }) {
           })}
         </tbody>
       </table>
+      <p className="text-xs text-gray-400 px-4 py-2 border-t border-gray-100">Click any vote count to see the specific agenda items.</p>
     </div>
   )
 }
@@ -254,6 +346,7 @@ export default function TrendsView() {
   const [incentives, setIncentives] = useState([])
   const [loading, setLoading] = useState(true)
   const [voteCategory, setVoteCategory] = useState('')
+  const [drill, setDrill] = useState(null) // { member, voteType }
 
   useEffect(() => {
     setLoading(true)
@@ -276,6 +369,7 @@ export default function TrendsView() {
 
   async function loadVotesForCategory(cat) {
     setVoteCategory(cat)
+    setDrill(null)
     try {
       const data = await getVotesByMember(cat)
       setVotesData(data)
@@ -394,52 +488,69 @@ export default function TrendsView() {
 
       {tab === 'votes' && (
         <div className="space-y-4">
-          {/* Category filter for votes */}
-          <div className="flex items-center gap-3 flex-wrap">
-            <span className="text-sm font-medium text-gray-600 flex items-center gap-1.5">
-              <Filter className="w-4 h-4" /> Filter by category:
-            </span>
-            <button
-              onClick={() => loadVotesForCategory('')}
-              className={`text-xs px-3 py-1.5 rounded-full border font-semibold transition-all ${
-                !voteCategory ? 'bg-fw-blue text-white border-fw-blue' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
-              }`}
-            >
-              All categories
-            </button>
-            {categories.map(cat => (
+          {/* Category filter — hide when drilling in */}
+          {!drill && (
+            <div className="flex items-center gap-3 flex-wrap">
+              <span className="text-sm font-medium text-gray-600 flex items-center gap-1.5">
+                <Filter className="w-4 h-4" /> Filter by category:
+              </span>
               <button
-                key={cat}
-                onClick={() => loadVotesForCategory(cat)}
+                onClick={() => loadVotesForCategory('')}
                 className={`text-xs px-3 py-1.5 rounded-full border font-semibold transition-all ${
-                  voteCategory === cat ? 'bg-fw-blue text-white border-fw-blue' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+                  !voteCategory ? 'bg-fw-blue text-white border-fw-blue' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
                 }`}
               >
-                {cat}
+                All categories
               </button>
-            ))}
-          </div>
+              {categories.map(cat => (
+                <button
+                  key={cat}
+                  onClick={() => loadVotesForCategory(cat)}
+                  className={`text-xs px-3 py-1.5 rounded-full border font-semibold transition-all ${
+                    voteCategory === cat ? 'bg-fw-blue text-white border-fw-blue' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+                  }`}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+          )}
 
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-            <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between">
-              <h3 className="font-semibold text-gray-800">
-                Vote Breakdown by Councilmember
-                {voteCategory && <span className="text-gray-400 font-normal"> — {voteCategory}</span>}
-              </h3>
-              {votesData && (
-                <span className="text-xs text-gray-400">
-                  {votesData.total_items_with_votes} items with vote records
-                </span>
+          {drill ? (
+            <VoteDrillDown
+              member={drill.member}
+              voteType={drill.voteType}
+              category={voteCategory}
+              onClose={() => setDrill(null)}
+            />
+          ) : (
+            <>
+              <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between">
+                  <h3 className="font-semibold text-gray-800">
+                    Vote Breakdown by Councilmember
+                    {voteCategory && <span className="text-gray-400 font-normal"> — {voteCategory}</span>}
+                  </h3>
+                  {votesData && (
+                    <span className="text-xs text-gray-400">
+                      {votesData.total_items_with_votes} items with vote records
+                    </span>
+                  )}
+                </div>
+                <VotesTable
+                  members={votesData?.members}
+                  loading={loading && !votesData}
+                  onDrill={(member, voteType) => setDrill({ member, voteType })}
+                />
+              </div>
+
+              {(!votesData || votesData.total_items_with_votes === 0) && !loading && (
+                <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 text-sm text-yellow-800">
+                  <p className="font-semibold">No vote data found</p>
+                  <p className="mt-1">Vote records are extracted from meeting minutes. Run a bulk import (Import tab) to populate vote data.</p>
+                </div>
               )}
-            </div>
-            <VotesTable members={votesData?.members} loading={loading && !votesData} />
-          </div>
-
-          {(!votesData || votesData.total_items_with_votes === 0) && !loading && (
-            <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 text-sm text-yellow-800">
-              <p className="font-semibold">No vote data found</p>
-              <p className="mt-1">Vote records are extracted from meeting minutes. Run a bulk import (Import tab) to populate vote data.</p>
-            </div>
+            </>
           )}
         </div>
       )}

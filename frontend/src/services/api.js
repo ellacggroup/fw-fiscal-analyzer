@@ -142,6 +142,12 @@ export async function getVotesTimeline() {
   const { data } = await api.get('/analytics/votes-timeline')
   return data
 }
+export async function getMemberVoteItems(name, vote, category = '') {
+  const params = { name, vote }
+  if (category) params.category = category
+  const { data } = await api.get('/analytics/member-vote-items', { params })
+  return data
+}
 
 // ── Bulk import ───────────────────────────────────────────────────────────────
 export async function startBulkImport(years = 5) {

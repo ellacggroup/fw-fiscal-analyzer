@@ -463,6 +463,59 @@ def get_votes_by_member(
     return {"total_items_with_votes": len(rows), "members": results}
 
 
+@router.get("/member-vote-items")
+def get_member_vote_items(
+    name: str,
+    vote: str,
+    category: str = "",
+    db: Session = Depends(get_db),
+):
+    """
+    Return the specific agenda items a council member voted a given way on.
+    name: canonical member name (e.g. "Elizabeth Beck")
+    vote: AYE | NAY | ABSTAIN | ABSENT
+    category: optional category filter
+    """
+    query = (
+        db.query(AgendaItem, AgendaUpload)
+        .join(AgendaUpload, AgendaItem.upload_id == AgendaUpload.id)
+        .filter(AgendaItem.votes.isnot(None))
+    )
+    if category:
+        query = query.filter(AgendaItem.category == category)
+    rows = query.all()
+
+    name_lower = name.strip().lower()
+    vote_upper = vote.strip().upper()
+    results = []
+
+    for item, upload in rows:
+        votes_data = item.votes or {}
+        by_member = votes_data.get("by_member") or []
+        for vote_rec in by_member:
+            raw_name = vote_rec.get("name", "Unknown")
+            canonical = _normalize_name(raw_name) if raw_name != "Unknown" else raw_name
+            if canonical.lower() != name_lower:
+                continue
+            if vote_rec.get("vote", "").upper() != vote_upper:
+                continue
+            analysis = item.analysis or {}
+            results.append({
+                "item_id":       item.id,
+                "upload_id":     item.upload_id,
+                "meeting_date":  upload.meeting_date,
+                "item_number":   item.item_number,
+                "title":         item.title or "",
+                "category":      item.category or "",
+                "fiscal_rating": analysis.get("fiscal_impact_rating"),
+                "summary":       (item.description or "")[:180] or (item.title or "")[:180],
+            })
+            break  # one vote per item per member
+
+    results.sort(key=lambda x: x["meeting_date"] or "", reverse=True)
+    return {"member": name, "vote": vote_upper, "total": len(results), "items": results}
+
+
 @router.get("/votes-timeline")
 def get_votes_timeline(db: Session = Depends(get_db)):
     """
