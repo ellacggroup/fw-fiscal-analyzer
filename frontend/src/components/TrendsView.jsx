@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import { TrendingUp, Users, BarChart2, FileText, Filter, Clock, Download, X, ChevronLeft } from 'lucide-react'
+
 import {
   getCategoryTrends, getVotesByMember, getAnalyticsSummary,
-  getZoningActivity, getIncentiveHistory, getMemberVoteItems,
+  getZoningActivity, getMemberVoteItems,
 } from '../services/api'
 import HistoryView from './HistoryView'
 import BulkImportPanel from './BulkImportPanel'
@@ -504,7 +505,6 @@ export default function TrendsView() {
   const [votesData, setVotesData] = useState(null)
   const [summary, setSummary] = useState(null)
   const [zoning, setZoning] = useState([])
-  const [incentives, setIncentives] = useState([])
   const [loading, setLoading] = useState(true)
   const [voteCategory, setVoteCategory] = useState('')
 
@@ -515,14 +515,12 @@ export default function TrendsView() {
       getVotesByMember(),
       getAnalyticsSummary(),
       getZoningActivity(),
-      getIncentiveHistory(),
     ])
-      .then(([trends, votes, sum, zon, inc]) => {
+      .then(([trends, votes, sum, zon]) => {
         setTrendsData(trends)
         setVotesData(votes)
         setSummary(sum)
         setZoning(zon.items || [])
-        setIncentives(inc.items || [])
       })
       .finally(() => setLoading(false))
   }, [])
@@ -592,7 +590,6 @@ export default function TrendsView() {
             { key: 'overview',   label: 'Category Trends', icon: BarChart2  },
             { key: 'votes',      label: 'Council Votes',   icon: Users      },
             { key: 'zoning',     label: 'Zoning Cases',    icon: FileText   },
-            { key: 'incentives', label: 'Incentives',      icon: TrendingUp },
             { key: 'history',    label: 'History',         icon: Clock      },
             { key: 'import',     label: 'Import',          icon: Download   },
           ].map(({ key, label, icon: Icon }) => (
@@ -664,43 +661,8 @@ export default function TrendsView() {
         </div>
       )}
 
-      {tab === 'incentives' && (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <div className="px-5 py-3.5 border-b border-gray-100">
-            <h3 className="font-semibold text-gray-800">Economic Incentives (5-Year)</h3>
-          </div>
-          {incentives.length === 0 ? (
-            <p className="text-sm text-gray-400 text-center py-8">No incentive deals imported yet.</p>
-          ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
-                  <th className="px-4 py-2.5 text-left">Date</th>
-                  <th className="px-4 py-2.5 text-left">Title</th>
-                  <th className="px-4 py-2.5 text-right">Rating</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {incentives.slice(0, 50).map(item => (
-                  <tr key={item.item_id} className="hover:bg-gray-50">
-                    <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap text-xs">{item.meeting_date}</td>
-                    <td className="px-4 py-2.5 text-gray-800">{item.title}</td>
-                    <td className="px-4 py-2.5 text-right">
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
-                        item.rating === 'POSITIVE' ? 'bg-green-100 text-green-700' :
-                        item.rating === 'NEGATIVE' ? 'bg-red-100 text-red-700' :
-                        'bg-gray-100 text-gray-600'
-                      }`}>{item.rating || '—'}</span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      )}
 
-      {tab === 'history' && <HistoryView />}
+{tab === 'history' && <HistoryView />}
       {tab === 'import' && <BulkImportPanel />}
     </div>
   )
