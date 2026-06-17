@@ -533,7 +533,10 @@ export default function TrendsView() {
     } catch {}
   }
 
-  const categories = trendsData?.categories || []
+  const HIDDEN_CATEGORIES = new Set([
+    'Economic Incentive', 'Development Agreement', 'TIRZ / Tax Increment', 'Public Improvement District',
+  ])
+  const categories = (trendsData?.categories || []).filter(c => !HIDDEN_CATEGORIES.has(c))
   const trendRows = trendsData?.by_quarter || []
 
   // Compute category totals
@@ -551,7 +554,7 @@ export default function TrendsView() {
         <div>
           <h2 className="text-xl font-bold text-gray-900">5-Year Trend Analysis</h2>
           <p className="text-sm text-gray-500 mt-0.5">
-            Zoning, incentives, land use, platting, site plans, and fee actions
+            Zoning, land use, platting, site plans, and fee actions
           </p>
         </div>
         <TrendingUp className="w-8 h-8 text-fw-blue" />
@@ -559,7 +562,7 @@ export default function TrendsView() {
 
       {/* Summary stats */}
       {summary && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <StatCard
             label="Total Meetings"
             value={summary.total_uploads}
@@ -574,11 +577,6 @@ export default function TrendsView() {
             label="Zoning Cases"
             value={catTotals['Zoning Change'] || 0}
             sub="5-year total"
-          />
-          <StatCard
-            label="Incentive Deals"
-            value={(catTotals['Economic Incentive'] || 0) + (catTotals['Development Agreement'] || 0)}
-            sub="Chapter 380 + agreements"
           />
         </div>
       )}
