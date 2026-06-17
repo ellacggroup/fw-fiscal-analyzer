@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getZoningActivity, getIncentiveHistory } from '../services/api'
+import { getZoningActivity } from '../services/api'
 import { BarChart2, ArrowRight, TrendingUp, TrendingDown, Minus } from 'lucide-react'
 
 const RATING_DOT = {
@@ -63,7 +63,6 @@ function fmt(n) {
 export default function HistoryView() {
   const [tab, setTab]           = useState('transitions')
   const [zoning, setZoning]     = useState([])
-  const [incentives, setIncentives] = useState([])
   const [loading, setLoading]   = useState(false)
   const [search, setSearch]     = useState('')
   const [filterFrom, setFilterFrom] = useState('')
@@ -71,10 +70,9 @@ export default function HistoryView() {
 
   useEffect(() => {
     setLoading(true)
-    Promise.all([getZoningActivity(), getIncentiveHistory()])
-      .then(([z, i]) => {
+    getZoningActivity()
+      .then(z => {
         setZoning(z.items || [])
-        setIncentives(i.items || [])
       })
       .finally(() => setLoading(false))
   }, [])
@@ -164,7 +162,6 @@ export default function HistoryView() {
           { key: 'transitions', label: 'Transition Patterns' },
           { key: 'broad',       label: 'By Land Use Type' },
           { key: 'cases',       label: 'All ZC Cases' },
-          { key: 'incentives',  label: 'Economic Incentives' },
         ].map(({ key, label }) => (
           <button key={key} onClick={() => setTab(key)}
             className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${
@@ -358,51 +355,6 @@ export default function HistoryView() {
         </div>
       )}
 
-      {/* ── Economic Incentives ── */}
-      {tab === 'incentives' && (
-        <div className="space-y-3">
-          <p className="text-xs text-gray-500">All economic incentive deals across uploaded agendas.</p>
-          {incentives.length === 0 && (
-            <p className="text-sm text-gray-400 text-center py-8">No economic incentive items found.</p>
-          )}
-          {incentives.map(inc => (
-            <div key={inc.item_id} className="bg-white rounded-xl border border-gray-200 p-4 space-y-2">
-              <div className="flex items-start justify-between gap-2 flex-wrap">
-                <div>
-                  <p className="text-xs text-gray-500 mb-0.5">{inc.meeting_date || '—'}</p>
-                  <p className="text-sm font-semibold text-gray-900">{inc.title}</p>
-                </div>
-                <div className="flex gap-2 flex-wrap flex-shrink-0">
-                  {inc.incentive_type && (
-                    <span className="text-xs bg-emerald-100 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-full font-semibold">
-                      {inc.incentive_type}
-                    </span>
-                  )}
-                  {inc.mc_enriched && (
-                    <span className="text-xs bg-blue-100 text-blue-800 border border-blue-200 px-2 py-0.5 rounded-full font-semibold">
-                      Staff Report
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-4 text-xs text-gray-600">
-                {inc.mc_investment && (
-                  <span><strong className="text-gray-900">${inc.mc_investment.toLocaleString()}</strong> investment</span>
-                )}
-                {inc.min_foregone != null && (
-                  <span><strong className="text-red-700">{fmt(inc.min_foregone)}/yr</strong> min foregone</span>
-                )}
-                {inc.term_years && (
-                  <span><strong className="text-gray-900">{inc.term_years} yr</strong> term</span>
-                )}
-                {inc.total_cap != null && (
-                  <span><strong className="text-gray-900">{fmt(inc.total_cap)}</strong> total cap</span>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   )
 }
