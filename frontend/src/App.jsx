@@ -175,6 +175,12 @@ export default function App() {
 
         {/* Agenda tab content */}
         {mainTab === 'agenda' && (<>
+          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex gap-3 items-start">
+            <span className="text-amber-500 text-lg leading-none mt-0.5">⚠</span>
+            <p className="text-sm text-amber-800">
+              <span className="font-semibold">Development items only.</span> This tool analyzes Fort Worth City Council agendas for commercial and real estate development items — zoning changes, site plans, platting, land use amendments, development agreements, TIRZ districts, annexations, right-of-way actions, impact fees, and utility extensions. Non-development business (budget, personnel, contracts, policy resolutions) is excluded from analysis.
+            </p>
+          </div>
           <UploadZone
             onUpload={handleUpload}
             onUploadUrl={handleUploadUrl}

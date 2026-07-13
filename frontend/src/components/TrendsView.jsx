@@ -499,7 +499,7 @@ export default function TrendsView() {
   }, [])
 
 const HIDDEN_CATEGORIES = new Set([
-    'Economic Incentive', 'Development Agreement', 'TIRZ / Tax Increment', 'Public Improvement District',
+    'Contract / Procurement', 'Budget Amendment', 'Personnel', 'Administrative', 'Other',
   ])
   const categories = (trendsData?.categories || []).filter(c => !HIDDEN_CATEGORIES.has(c))
   const trendRows = trendsData?.by_quarter || []
@@ -519,10 +519,18 @@ const HIDDEN_CATEGORIES = new Set([
         <div>
           <h2 className="text-xl font-bold text-gray-900">5-Year Trend Analysis</h2>
           <p className="text-sm text-gray-500 mt-0.5">
-            Zoning, land use, platting, site plans, and fee actions
+            Commercial &amp; real estate development agenda items — Fort Worth City Council
           </p>
         </div>
         <TrendingUp className="w-8 h-8 text-fw-blue" />
+      </div>
+
+      {/* Scope disclaimer */}
+      <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex gap-3 items-start">
+        <span className="text-amber-500 text-lg leading-none mt-0.5">⚠</span>
+        <div className="text-sm text-amber-800">
+          <span className="font-semibold">Development items only.</span> This tool tracks Fort Worth City Council agenda items related to commercial and real estate development — including zoning changes, site plans, platting, land use amendments, development agreements, TIRZ districts, annexations, right-of-way actions, impact fees, and utility extensions. It does <span className="font-semibold">not</span> capture all city council business. Non-development items such as budget amendments, personnel actions, contracts, and policy resolutions are excluded.
+        </div>
       </div>
 
       {/* Summary stats */}
