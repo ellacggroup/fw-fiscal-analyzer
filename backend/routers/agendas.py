@@ -295,6 +295,13 @@ async def reanalyze_agenda(upload_id: int, db: Session = Depends(get_db)):
     claude_analyses = analyze_items_with_claude(raw_items, upload.meeting_date, rule_analyses)
     using_claude    = claude_available()
 
+    # Preserve votes and districts before replacing items (reanalysis must not wipe vote data)
+    existing_votes = {
+        item.item_number: {"votes": item.votes, "districts": item.districts}
+        for item in db.query(AgendaItem).filter(AgendaItem.upload_id == upload_id).all()
+        if item.item_number
+    }
+
     # Replace old items
     db.query(AgendaItem).filter(AgendaItem.upload_id == upload_id).delete()
     db.commit()
@@ -322,14 +329,18 @@ async def reanalyze_agenda(upload_id: int, db: Session = Depends(get_db)):
         if is_real_estate_item(cat, item_data.get("title", ""), item_data.get("description", "")):
             _enrich_with_gis(merged, item_data, cat)
 
+        item_num = item_data.get("item_number")
+        prior = existing_votes.get(item_num, {})
         db_item = AgendaItem(
             upload_id=upload_id,
-            item_number=item_data.get("item_number"),
+            item_number=item_num,
             title=item_data.get("title", ""),
             description=item_data.get("description", ""),
             section=item_data.get("section", ""),
             category=cat,
             analysis=merged,
+            votes=prior.get("votes"),
+            districts=prior.get("districts"),
         )
         db.add(db_item)
         db.commit()

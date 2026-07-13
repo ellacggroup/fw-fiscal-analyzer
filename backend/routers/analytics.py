@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from database import AgendaItem, AgendaUpload, get_db
-from services.vote_parser import _normalize_name
+from services.vote_parser import _normalize_name, _MEMBER_DISTRICT
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -435,22 +435,26 @@ def get_votes_by_member(
         for vote_rec in by_member:
             raw_name = vote_rec.get("name", "Unknown")
             name = _normalize_name(raw_name) if raw_name != "Unknown" else raw_name
-            district = vote_rec.get("district", "")
             vote_type = vote_rec.get("vote", "")
-            key = f"{name}|{district}"
-
-            if key not in member_stats:
-                member_stats[key] = {
+            # Key by name only — prevents same person appearing twice due to
+            # mismatched district codes in different meeting minutes
+            if name not in member_stats:
+                # Look up canonical district from the authoritative member table
+                canonical_district = _MEMBER_DISTRICT.get(name.lower(), "")
+                if not canonical_district:
+                    last = name.lower().split()[-1] if name.split() else ""
+                    canonical_district = _MEMBER_DISTRICT.get(last, vote_rec.get("district", ""))
+                member_stats[name] = {
                     "name": name,
-                    "district": district,
+                    "district": canonical_district,
                     "AYE": 0,
                     "NAY": 0,
                     "ABSTAIN": 0,
                     "ABSENT": 0,
                     "items": 0,
                 }
-            member_stats[key][vote_type] = member_stats[key].get(vote_type, 0) + 1
-            member_stats[key]["items"] += 1
+            member_stats[name][vote_type] = member_stats[name].get(vote_type, 0) + 1
+            member_stats[name]["items"] += 1
 
     results = sorted(
         member_stats.values(),
