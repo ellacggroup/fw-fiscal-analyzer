@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react'
-import { TrendingUp, Users, BarChart2, FileText, Filter, Clock, Download, X, ChevronLeft } from 'lucide-react'
-
+import { TrendingUp, Users, BarChart2, FileText, Clock, Download, X, ChevronLeft } from 'lucide-react'
 import {
   getCategoryTrends, getVotesByMember, getAnalyticsSummary,
   getZoningActivity, getMemberVoteItems,
@@ -293,7 +292,7 @@ function MemberVoteProfile({ member, category, onBack }) {
 }
 
 // The main votes panel — table + drill-down state all in one place
-function CouncilVotesPanel({ members, loading, voteCategory, categories, onCategoryChange }) {
+function CouncilVotesPanel({ members, loading }) {
   // view: 'table' | 'profile' | 'count'
   const [view, setView] = useState('table')
   const [selectedMember, setSelectedMember] = useState(null)
@@ -338,34 +337,9 @@ function CouncilVotesPanel({ members, loading, voteCategory, categories, onCateg
 
   return (
     <>
-      {/* Category filter */}
-      <div className="flex items-center gap-3 flex-wrap mb-4">
-        <span className="text-sm font-medium text-gray-600 flex items-center gap-1.5">
-          <Filter className="w-4 h-4" /> Filter:
-        </span>
-        <button
-          onClick={() => onCategoryChange('')}
-          className={`text-xs px-3 py-1.5 rounded-full border font-semibold transition-all ${!voteCategory ? 'bg-fw-blue text-white border-fw-blue' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'}`}
-        >
-          All categories
-        </button>
-        {categories.map(cat => (
-          <button
-            key={cat}
-            onClick={() => onCategoryChange(cat)}
-            className={`text-xs px-3 py-1.5 rounded-full border font-semibold transition-all ${voteCategory === cat ? 'bg-fw-blue text-white border-fw-blue' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'}`}
-          >
-            {cat}
-          </button>
-        ))}
-      </div>
-
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="px-5 py-3.5 border-b border-gray-100">
-          <h3 className="font-semibold text-gray-800">
-            Vote Breakdown by Councilmember
-            {voteCategory && <span className="text-gray-400 font-normal"> — {voteCategory}</span>}
-          </h3>
+          <h3 className="font-semibold text-gray-800">Vote Breakdown by Councilmember — All Development Items</h3>
           <p className="text-xs text-gray-400 mt-0.5">Click a name to see all votes · click a count to see those specific items</p>
         </div>
         <div className="overflow-x-auto">
@@ -506,7 +480,6 @@ export default function TrendsView() {
   const [summary, setSummary] = useState(null)
   const [zoning, setZoning] = useState([])
   const [loading, setLoading] = useState(true)
-  const [voteCategory, setVoteCategory] = useState('')
 
   useEffect(() => {
     setLoading(true)
@@ -525,15 +498,7 @@ export default function TrendsView() {
       .finally(() => setLoading(false))
   }, [])
 
-  async function loadVotesForCategory(cat) {
-    setVoteCategory(cat)
-    try {
-      const data = await getVotesByMember(cat)
-      setVotesData(data)
-    } catch {}
-  }
-
-  const HIDDEN_CATEGORIES = new Set([
+const HIDDEN_CATEGORIES = new Set([
     'Economic Incentive', 'Development Agreement', 'TIRZ / Tax Increment', 'Public Improvement District',
   ])
   const categories = (trendsData?.categories || []).filter(c => !HIDDEN_CATEGORIES.has(c))
@@ -624,8 +589,7 @@ export default function TrendsView() {
             {categories.map(cat => (
               <div
                 key={cat}
-                className="bg-white rounded-xl border border-gray-200 p-4 cursor-pointer hover:border-blue-400 transition-colors"
-                onClick={() => { setTab('votes'); loadVotesForCategory(cat) }}
+                className="bg-white rounded-xl border border-gray-200 p-4"
               >
                 <div
                   className="w-3 h-3 rounded-sm mb-2"
@@ -633,7 +597,6 @@ export default function TrendsView() {
                 />
                 <p className="text-xl font-bold text-gray-900">{catTotals[cat] || 0}</p>
                 <p className="text-xs text-gray-500 mt-0.5 leading-snug">{cat}</p>
-                <p className="text-xs text-blue-500 mt-1">View votes →</p>
               </div>
             ))}
           </div>
@@ -645,9 +608,6 @@ export default function TrendsView() {
           <CouncilVotesPanel
             members={votesData?.members}
             loading={loading && !votesData}
-            voteCategory={voteCategory}
-            categories={categories}
-            onCategoryChange={loadVotesForCategory}
           />
         </div>
       )}
