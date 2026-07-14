@@ -97,6 +97,13 @@ _OPPOSITION_RE = re.compile(
     r'([A-Z][^.]{3,300}?)\s+voted\s+in\s+opposition',
     re.IGNORECASE | re.DOTALL,
 )
+# Alternate Fort Worth phrasing for a lone/small dissent that never lists an
+# AYE-side name list at all, e.g. "Motion passed 7-1, Council Member Blaylock
+# casting the dissenting vote and Council Member Beck absent."
+_DISSENT_RE = re.compile(
+    r'([A-Z][^.]{3,300}?)\s+casting\s+the\s+dissenting\s+votes?',
+    re.IGNORECASE | re.DOTALL,
+)
 _ABSENT_RE = re.compile(
     r'(?:Council\s+Member\s+|Mayor\s+(?:Pro\s+[Tt]em\s+)?)?'
     r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+absent',
@@ -207,28 +214,46 @@ def extract_districts_from_ref(text: str) -> list[str]:
     return re.findall(r'\d+', m.group(2))
 
 
-def _build_unanimous_members(absent_names: list[str], member_map: dict) -> list[dict]:
-    absent_lower = {n.lower() for n in absent_names}
-    absent_last  = {n.split()[-1].lower() for n in absent_names}
+def _build_unanimous_members(
+    absent_names: list[str], member_map: dict, dissent_names: list[str] = None,
+) -> list[dict]:
+    """
+    Build the full by-member vote list when the minutes never spell out an
+    AYE-side name list — either a true unanimous vote (dissent_names empty)
+    or Fort Worth's "Council Member X casting the dissenting vote" phrasing,
+    where only the dissenter(s) and absences are named and everyone else is
+    implicitly AYE.
+    """
+    dissent_names = dissent_names or []
+    absent_lower  = {n.lower() for n in absent_names}
+    absent_last   = {n.split()[-1].lower() for n in absent_names}
+    dissent_lower = {n.lower() for n in dissent_names}
+    dissent_last  = {n.split()[-1].lower() for n in dissent_names}
+
+    def _vote_for(name_lower: str, last: str) -> str:
+        if name_lower in dissent_lower or last in dissent_last:
+            return "NAY"
+        if name_lower in absent_lower or last in absent_last:
+            return "ABSENT"
+        return "AYE"
+
     by_member = []
     if member_map:
         full_entries = {k: v for k, v in member_map.items() if ' ' in k}
         roster = full_entries if full_entries else member_map
         for name, district in roster.items():
-            is_absent = name in absent_lower or name.split()[-1] in absent_last
             by_member.append({
                 "name": name.title(),
                 "district": district,
-                "vote": "ABSENT" if is_absent else "AYE",
+                "vote": _vote_for(name, name.split()[-1]),
             })
     else:
         for full_name, district in _CURRENT_ROSTER:
             last = full_name.split()[-1].lower()
-            is_absent = full_name.lower() in absent_lower or last in absent_last
             by_member.append({
                 "name": full_name,
                 "district": district,
-                "vote": "ABSENT" if is_absent else "AYE",
+                "vote": _vote_for(full_name.lower(), last),
             })
     return by_member
 
@@ -256,6 +281,23 @@ def _parse_motion_text(motion_text: str, member_map: dict) -> Optional[dict]:
     else:
         support_m    = _SUPPORT_RE.search(tail)
         opposition_m = _OPPOSITION_RE.search(tail)
+        dissent_m    = _DISSENT_RE.search(tail) if not opposition_m else None
+
+        if not support_m and not opposition_m and dissent_m:
+            # "Council Member X casting the dissenting vote" — the AYE side
+            # is never named, so infer it: everyone present who isn't the
+            # named dissenter(s) or absent voted AYE.
+            dissent_names = _extract_names_from_list(dissent_m.group(1))
+            by_member = _build_unanimous_members(absent_names, member_map, dissent_names)
+            return {
+                "ayes": ayes_count,
+                "nays": nays_count,
+                "abstain": 0,
+                "absent": len(absent_names),
+                "passed": passed,
+                "by_member": by_member,
+                "raw": motion_text.strip()[:300],
+            }
 
         if support_m:
             for name in _extract_names_from_list(support_m.group(1)):
