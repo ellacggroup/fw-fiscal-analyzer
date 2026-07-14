@@ -316,11 +316,11 @@ function CouncilVotesPanel({ members, loading }) {
   }
 
   if (view === 'profile' && selectedMember) {
-    return <MemberVoteProfile member={selectedMember} category={voteCategory} onBack={backToTable} />
+    return <MemberVoteProfile member={selectedMember} category="" onBack={backToTable} />
   }
 
   if (view === 'count' && selectedMember && selectedVoteType) {
-    return <VoteCountDrillDown member={selectedMember} voteType={selectedVoteType} category={voteCategory} onBack={backToTable} />
+    return <VoteCountDrillDown member={selectedMember} voteType={selectedVoteType} category="" onBack={backToTable} />
   }
 
   // Table view
