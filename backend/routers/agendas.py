@@ -94,8 +94,23 @@ async def _process_pdf(
     # Rule-based analysis (instant, always available)
     rule_analyses = [analyze_fiscal_impact(item) for item in raw_items]
 
-    # Claude analysis (optional; batched) — pass rule analyses for context
-    claude_analyses = analyze_items_with_claude(raw_items, meeting_date, rule_analyses)
+    # GIS enrichment: comp plan + zoning case lookup for real estate / zoning items.
+    # Runs BEFORE Claude so its qualitative analysis can see verified zoning/comp-plan
+    # data instead of just the raw agenda text.
+    item_categories = []
+    for item_data, rule in zip(raw_items, rule_analyses):
+        cat = _infer_category_label(rule, item_data.get("section", ""))
+        item_categories.append(cat)
+        if is_real_estate_item(cat, item_data.get("title", ""), item_data.get("description", "")):
+            await asyncio.to_thread(_enrich_with_gis, rule, item_data, cat)
+
+    # Claude analysis (optional; batched) — pass GIS-enriched rule analyses for
+    # context. This is a blocking network call, so it's offloaded to a worker
+    # thread like the GIS lookups above — otherwise one upload's Claude calls
+    # would tie up the whole server for everyone else.
+    claude_analyses = await asyncio.to_thread(
+        analyze_items_with_claude, raw_items, meeting_date, rule_analyses,
+    )
     using_claude = claude_available()
 
     # Merge: Claude adds qualitative narrative; rule engine owns ratings for
@@ -132,12 +147,6 @@ async def _process_pdf(
 
         merged_analyses.append(merged)
 
-    # GIS enrichment: comp plan + zoning case lookup for real estate / zoning items
-    for i, (item_data, merged) in enumerate(zip(raw_items, merged_analyses)):
-        cat = _infer_category_label(merged, item_data.get("section", ""))
-        if is_real_estate_item(cat, item_data.get("title", ""), item_data.get("description", "")):
-            await asyncio.to_thread(_enrich_with_gis, merged, item_data, cat)
-
     # Persist
     upload = AgendaUpload(
         filename=display_name,
@@ -151,14 +160,14 @@ async def _process_pdf(
     db.refresh(upload)
 
     saved_items = []
-    for item_data, analysis in zip(raw_items, merged_analyses):
+    for item_data, analysis, cat in zip(raw_items, merged_analyses, item_categories):
         db_item = AgendaItem(
             upload_id=upload.id,
             item_number=item_data.get("item_number"),
             title=item_data.get("title", ""),
             description=item_data.get("description", ""),
             section=item_data.get("section", ""),
-            category=_infer_category_label(analysis, item_data.get("section", "")),
+            category=cat,
             analysis=analysis,
         )
         db.add(db_item)
@@ -218,9 +227,20 @@ async def reanalyze_all_agendas(db: Session = Depends(get_db)):
             continue
         try:
             raw_items = extract_agenda_items(upload.raw_text)
-            rule_analyses   = [analyze_fiscal_impact(item) for item in raw_items]
-            claude_analyses = analyze_items_with_claude(raw_items, upload.meeting_date, rule_analyses)
-            using_claude    = claude_available()
+            rule_analyses = [analyze_fiscal_impact(item) for item in raw_items]
+
+            # GIS enrichment before Claude, same reasoning as single reanalyze.
+            item_categories = []
+            for item_data, rule in zip(raw_items, rule_analyses):
+                cat = _infer_category_label(rule, item_data.get("section", ""))
+                item_categories.append(cat)
+                if is_real_estate_item(cat, item_data.get("title", ""), item_data.get("description", "")):
+                    await asyncio.to_thread(_enrich_with_gis, rule, item_data, cat)
+
+            claude_analyses = await asyncio.to_thread(
+                analyze_items_with_claude, raw_items, upload.meeting_date, rule_analyses,
+            )
+            using_claude = claude_available()
 
             # Preserve votes and districts before replacing items (reanalysis must not wipe vote data)
             existing_votes = {
@@ -233,7 +253,10 @@ async def reanalyze_all_agendas(db: Session = Depends(get_db)):
             db.commit()
 
             count = 0
-            for item_data, rule, claude in zip(raw_items, rule_analyses, claude_analyses):
+            for item_data, rule, claude, cat in zip(raw_items, rule_analyses, claude_analyses, item_categories):
+                if cat not in DEVELOPMENT_CATEGORIES:
+                    continue
+
                 merged = dict(rule)
                 merged["claude_summary"]             = claude["summary"]
                 merged["risk_level"]                 = claude["risk_level"]
@@ -250,12 +273,6 @@ async def reanalyze_all_agendas(db: Session = Depends(get_db)):
                 if rule.get("site_plan_type") and rule.get("fiscal_impact_rating") in ("POSITIVE", "NEUTRAL"):
                     if claude.get("fiscal_impact_rating") == "NEGATIVE":
                         merged["fiscal_impact_rating"] = rule["fiscal_impact_rating"]
-
-                cat = _infer_category_label(merged, item_data.get("section", ""))
-                if cat not in DEVELOPMENT_CATEGORIES:
-                    continue
-                if is_real_estate_item(cat, item_data.get("title", ""), item_data.get("description", "")):
-                    await asyncio.to_thread(_enrich_with_gis, merged, item_data, cat)
 
                 item_num = item_data.get("item_number")
                 prior = existing_votes.get(item_num, {})
@@ -306,9 +323,21 @@ async def reanalyze_agenda(upload_id: int, db: Session = Depends(get_db)):
     if not raw_items:
         raise HTTPException(status_code=422, detail="Could not re-parse agenda items from stored text.")
 
-    rule_analyses   = [analyze_fiscal_impact(item) for item in raw_items]
-    claude_analyses = analyze_items_with_claude(raw_items, upload.meeting_date, rule_analyses)
-    using_claude    = claude_available()
+    rule_analyses = [analyze_fiscal_impact(item) for item in raw_items]
+
+    # GIS enrichment runs before Claude (on the rule analyses directly) so
+    # Claude's qualitative pass can see verified zoning/comp-plan data.
+    item_categories = []
+    for item_data, rule in zip(raw_items, rule_analyses):
+        cat = _infer_category_label(rule, item_data.get("section", ""))
+        item_categories.append(cat)
+        if is_real_estate_item(cat, item_data.get("title", ""), item_data.get("description", "")):
+            await asyncio.to_thread(_enrich_with_gis, rule, item_data, cat)
+
+    claude_analyses = await asyncio.to_thread(
+        analyze_items_with_claude, raw_items, upload.meeting_date, rule_analyses,
+    )
+    using_claude = claude_available()
 
     # Preserve votes and districts before replacing items (reanalysis must not wipe vote data)
     existing_votes = {
@@ -322,7 +351,10 @@ async def reanalyze_agenda(upload_id: int, db: Session = Depends(get_db)):
     db.commit()
 
     saved_items = []
-    for item_data, rule, claude in zip(raw_items, rule_analyses, claude_analyses):
+    for item_data, rule, claude, cat in zip(raw_items, rule_analyses, claude_analyses, item_categories):
+        if cat not in DEVELOPMENT_CATEGORIES:
+            continue
+
         merged = dict(rule)
         merged["claude_summary"]            = claude["summary"]
         merged["risk_level"]                = claude["risk_level"]
@@ -339,12 +371,6 @@ async def reanalyze_agenda(upload_id: int, db: Session = Depends(get_db)):
         if rule.get("site_plan_type") and rule.get("fiscal_impact_rating") in ("POSITIVE", "NEUTRAL"):
             if claude.get("fiscal_impact_rating") == "NEGATIVE":
                 merged["fiscal_impact_rating"] = rule["fiscal_impact_rating"]
-
-        cat = _infer_category_label(merged, item_data.get("section", ""))
-        if cat not in DEVELOPMENT_CATEGORIES:
-            continue
-        if is_real_estate_item(cat, item_data.get("title", ""), item_data.get("description", "")):
-            await asyncio.to_thread(_enrich_with_gis, merged, item_data, cat)
 
         item_num = item_data.get("item_number")
         prior = existing_votes.get(item_num, {})

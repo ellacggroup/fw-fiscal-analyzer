@@ -18,8 +18,13 @@ from typing import Optional
 
 import anthropic
 
+from services.zoning_gis_lookup import lookup_zoning_case
+from services.comprehensive_plan import lookup_comprehensive_plan
+
 _client: Optional[anthropic.Anthropic] = None
 BATCH_SIZE = 6  # smaller batches = more attention per item from Claude
+MODEL = "claude-sonnet-5"
+MAX_TOOL_ROUNDS = 3  # cap agentic back-and-forth so one batch can't run away
 
 
 def _get_client() -> Optional[anthropic.Anthropic]:
@@ -120,7 +125,58 @@ A plat or site plan APPROVAL is a regulatory step. The approval itself is NEUTRA
 Describe what development it enables and its fiscal implications. Do not rate the
 approval as NEGATIVE just because the underlying land use has a low R/C ratio.
 The broader development context matters.
+
+## Tools
+Most items already include a [Context: ...] block with zoning and Comprehensive Plan
+data the city's own GIS lookup already ran for you — use that first, it's authoritative.
+Only call a tool when a case number or address is mentioned in the item text that is
+NOT already covered by the provided context (e.g. the item references a second, related
+case number, or no context block is present for an item that clearly needs one). Do not
+call a tool "just to check" on items that already have context — that wastes time and
+money for no benefit. Never call a tool more than once for the same case/address.
 """
+
+_TOOLS = [
+    {
+        "name": "lookup_zoning_case",
+        "description": (
+            "Look up an official Fort Worth zoning case (ZC-, SP-, etc.) in the City's "
+            "GIS system. Returns current/proposed zoning codes, acreage, applicant, "
+            "requested action, and Comprehensive Plan consistency. Only use this for a "
+            "specific case number mentioned in the item that isn't already covered by "
+            "the item's provided [Context] block."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "case_number": {
+                    "type": "string",
+                    "description": "The zoning case number, e.g. 'ZC-24-015' or 'SP-23-009'",
+                },
+            },
+            "required": ["case_number"],
+        },
+    },
+    {
+        "name": "lookup_comp_plan",
+        "description": (
+            "Look up the Fort Worth Comprehensive Plan's Future Land Use designation for "
+            "an address or intersection, to check whether a proposed action is consistent "
+            "with the adopted plan. Only use this when an address is mentioned that isn't "
+            "already covered by the item's provided [Context] block."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "address_or_text": {
+                    "type": "string",
+                    "description": "A street address or intersection to look up",
+                },
+            },
+            "required": ["address_or_text"],
+        },
+    },
+]
 
 _ITEM_SCHEMA = """\
 For EACH item return a JSON object with these exact keys:
@@ -170,6 +226,14 @@ def _build_prompt(
             if net_change is not None:
                 direction = "improves" if net_change > 0 else "worsens"
                 context_lines.append(f"R/C analysis: rezoning {direction} city fiscal position by ~${abs(net_change):,}/yr")
+            if rule.get("zoning_gis_source"):
+                context_lines.append("(zoning codes verified against City GIS, not just agenda text)")
+
+        comp_plan_status = rule.get("comp_plan_lookup_status")
+        if comp_plan_status == "found":
+            lu_label = rule.get("comp_plan_lu_label", "")
+            consistent = rule.get("consistent_with_comp_plan", "")
+            context_lines.append(f"Comprehensive Plan future land use: {lu_label}" + (f" — {consistent}" if consistent else ""))
 
         context_block = ""
         if context_lines:
@@ -191,6 +255,27 @@ def _build_prompt(
     )
 
 
+def _execute_tool(name: str, tool_input: dict) -> str:
+    """Run a tool the model asked for and return its result as a JSON string."""
+    try:
+        if name == "lookup_zoning_case":
+            result = lookup_zoning_case(str(tool_input.get("case_number", "")).strip())
+            return json.dumps(result) if result else json.dumps(
+                {"error": "No GIS record found for this case number"}
+            )
+        if name == "lookup_comp_plan":
+            # category="Zoning Change" bypasses the relevance gate inside
+            # lookup_comprehensive_plan — Claude already judged this relevant
+            # by choosing to call the tool.
+            result = lookup_comprehensive_plan(
+                str(tool_input.get("address_or_text", "")), category="Zoning Change",
+            )
+            return json.dumps(result)
+        return json.dumps({"error": f"Unknown tool: {name}"})
+    except Exception as exc:
+        return json.dumps({"error": str(exc)})
+
+
 def _analyze_batch(
     client: anthropic.Anthropic,
     items: list[dict],
@@ -198,14 +283,42 @@ def _analyze_batch(
     meeting_date: Optional[str],
 ) -> list[dict]:
     prompt = _build_prompt(items, rule_analyses, meeting_date)
+    messages: list = [{"role": "user", "content": prompt}]
     try:
-        msg = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=4096,
-            system=_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        raw = msg.content[0].text.strip()
+        msg = None
+        for _ in range(MAX_TOOL_ROUNDS):
+            msg = client.messages.create(
+                model=MODEL,
+                max_tokens=4096,
+                system=_SYSTEM_PROMPT,
+                tools=_TOOLS,
+                messages=messages,
+            )
+            if msg.stop_reason != "tool_use":
+                break
+
+            messages.append({"role": "assistant", "content": msg.content})
+            tool_results = []
+            for block in msg.content:
+                if block.type == "tool_use":
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": _execute_tool(block.name, block.input),
+                    })
+            messages.append({"role": "user", "content": tool_results})
+        else:
+            # Exceeded MAX_TOOL_ROUNDS while still asking for tools — force
+            # one last plain-text attempt with no tools offered.
+            msg = client.messages.create(
+                model=MODEL,
+                max_tokens=4096,
+                system=_SYSTEM_PROMPT,
+                messages=messages,
+            )
+
+        text_blocks = [b.text for b in msg.content if b.type == "text"]
+        raw = "".join(text_blocks).strip()
 
         # Strip accidental markdown code fences
         if raw.startswith("```"):
