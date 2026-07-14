@@ -6,6 +6,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 from database import AgendaItem, AgendaUpload, get_db
 from services.vote_parser import _normalize_name, _MEMBER_DISTRICT
+from services.fiscal_analyzer import DEVELOPMENT_CATEGORIES
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -333,23 +334,9 @@ def get_land_use_trends(db: Session = Depends(get_db)):
     return {"dates": dates, "transition_types": all_keys, "by_date": rows}
 
 
-# All categories that affect real estate / real estate development
-_TREND_CATEGORIES = {
-    "Zoning Change",
-    "Site Plan / Plat",
-    "Platting",
-    "Land Use / Comp Plan",
-    "Economic Incentive",
-    "Development Agreement",
-    "TIRZ / Tax Increment",
-    "Public Improvement District",
-    "Impact / Development Fees",
-    "Annexation",
-    "Right-of-Way / Easement",
-    "Land Acquisition / Disposition",
-    "Utility Extension / Infrastructure",
-    "Development Code / Standards",
-}
+# All categories that affect real estate / real estate development.
+# Shared source of truth — see services.fiscal_analyzer.DEVELOPMENT_CATEGORIES.
+_TREND_CATEGORIES = DEVELOPMENT_CATEGORIES
 
 
 @router.get("/category-trends")
@@ -421,6 +408,7 @@ def get_votes_by_member(
         db.query(AgendaItem, AgendaUpload)
         .join(AgendaUpload, AgendaItem.upload_id == AgendaUpload.id)
         .filter(AgendaItem.votes.isnot(None))
+        .filter(AgendaItem.category.in_(DEVELOPMENT_CATEGORIES))
     )
     if category:
         query = query.filter(AgendaItem.category == category)
@@ -484,6 +472,7 @@ def get_member_vote_items(
         db.query(AgendaItem, AgendaUpload)
         .join(AgendaUpload, AgendaItem.upload_id == AgendaUpload.id)
         .filter(AgendaItem.votes.isnot(None))
+        .filter(AgendaItem.category.in_(DEVELOPMENT_CATEGORIES))
     )
     if category:
         query = query.filter(AgendaItem.category == category)
