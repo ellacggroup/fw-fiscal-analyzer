@@ -130,23 +130,12 @@ export async function getCategoryTrends() {
   const { data } = await api.get('/analytics/category-trends')
   return data
 }
-export async function getVotesByMember(category = '') {
-  const { data } = await api.get('/analytics/votes-by-member', { params: category ? { category } : {} })
-  return data
-}
 export async function getZoningTransitions() {
   const { data } = await api.get('/analytics/zoning-transitions')
   return data
 }
 export async function getVotesTimeline() {
   const { data } = await api.get('/analytics/votes-timeline')
-  return data
-}
-export async function getMemberVoteItems(name, vote = '', category = '') {
-  const params = { name }
-  if (vote) params.vote = vote
-  if (category) params.category = category
-  const { data } = await api.get('/analytics/member-vote-items', { params })
   return data
 }
 

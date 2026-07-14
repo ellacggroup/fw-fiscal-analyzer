@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
-import { TrendingUp, Users, BarChart2, FileText, Clock, Download, X, ChevronLeft, BookOpen } from 'lucide-react'
+import { TrendingUp, BarChart2, FileText, Clock, Download, BookOpen } from 'lucide-react'
 import {
-  getCategoryTrends, getVotesByMember, getAnalyticsSummary,
-  getZoningActivity, getMemberVoteItems,
+  getCategoryTrends, getAnalyticsSummary,
+  getZoningActivity,
 } from '../services/api'
 import HistoryView from './HistoryView'
 import BulkImportPanel from './BulkImportPanel'
@@ -115,305 +115,6 @@ function BarChart({ data, categories }) {
   )
 }
 
-// ── Council votes — self-contained panel with drill-down ─────────────────────
-// All sub-components defined at module level (never nested) to avoid React
-// treating them as new component types on each render, which breaks onClick.
-
-const VOTE_COLORS = {
-  AYE:     { pill: 'bg-green-100 text-green-700 border-green-200', text: 'text-green-700' },
-  NAY:     { pill: 'bg-red-100 text-red-700 border-red-200',       text: 'text-red-600'   },
-  ABSTAIN: { pill: 'bg-yellow-100 text-yellow-700 border-yellow-200', text: 'text-yellow-600' },
-  ABSENT:  { pill: 'bg-gray-100 text-gray-500 border-gray-200',    text: 'text-gray-400'  },
-}
-const VOTE_LABEL = { AYE: 'Aye', NAY: 'Nay', ABSTAIN: 'Abstain', ABSENT: 'Absent' }
-
-function AgendaItemRow({ item, showVoteBadge }) {
-  const pillCls = (VOTE_COLORS[item.vote] || {}).pill || ''
-  return (
-    <div className="px-5 py-3.5 hover:bg-gray-50">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            {showVoteBadge && item.vote && (
-              <span className={`text-xs px-1.5 py-0.5 rounded border font-semibold flex-shrink-0 ${pillCls}`}>
-                {VOTE_LABEL[item.vote] || item.vote}
-              </span>
-            )}
-            <p className="text-sm font-medium text-gray-900 leading-snug">{item.title || '(no title)'}</p>
-          </div>
-          {item.summary && item.summary !== item.title && (
-            <p className="text-xs text-gray-500 mt-1 leading-relaxed">{item.summary}</p>
-          )}
-        </div>
-        {item.fiscal_rating && (
-          <span className={`text-xs px-2 py-0.5 rounded-full font-semibold flex-shrink-0 ${
-            item.fiscal_rating === 'POSITIVE' ? 'bg-green-100 text-green-700' :
-            item.fiscal_rating === 'NEGATIVE' ? 'bg-red-100 text-red-700' :
-            'bg-gray-100 text-gray-600'
-          }`}>{item.fiscal_rating}</span>
-        )}
-      </div>
-      <div className="flex gap-3 mt-1.5 text-xs text-gray-400 flex-wrap">
-        {item.meeting_date && <span>{item.meeting_date}</span>}
-        {item.item_number && <span className="font-mono">{item.item_number}</span>}
-        {item.category && <span className="text-blue-500">{item.category}</span>}
-      </div>
-    </div>
-  )
-}
-
-function DrillBackHeader({ onBack, title, subtitle }) {
-  return (
-    <div className="px-5 py-3.5 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
-      <div className="flex items-center gap-3">
-        <button onClick={onBack} className="text-gray-400 hover:text-gray-700 p-0.5">
-          <ChevronLeft className="w-5 h-5" />
-        </button>
-        <div>
-          <p className="font-semibold text-gray-900">{title}</p>
-          {subtitle && <p className="text-xs text-gray-400 mt-0.5">{subtitle}</p>}
-        </div>
-      </div>
-      <button onClick={onBack} className="text-gray-400 hover:text-gray-700">
-        <X className="w-4 h-4" />
-      </button>
-    </div>
-  )
-}
-
-// Click a vote count number → see those specific items
-function VoteCountDrillDown({ member, voteType, category, onBack }) {
-  const [items, setItems] = useState(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    setLoading(true)
-    getMemberVoteItems(member.name, voteType, category)
-      .then(d => setItems(d.items || []))
-      .catch(() => setItems([]))
-      .finally(() => setLoading(false))
-  }, [member.name, voteType, category])
-
-  const voteLabel = { AYE: 'Ayes', NAY: 'Nays', ABSTAIN: 'Abstentions', ABSENT: 'Absences' }[voteType] || voteType
-  const pillCls = (VOTE_COLORS[voteType] || {}).pill || ''
-
-  return (
-    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-      <DrillBackHeader
-        onBack={onBack}
-        title={<>{member.name} <span className={`ml-2 text-xs px-2 py-0.5 rounded-full border font-semibold ${pillCls}`}>{voteLabel}</span></>}
-        subtitle={`District ${member.district} · ${category || 'All categories'}${!loading && items ? ` · ${items.length} items` : ''}`}
-      />
-      <div className="divide-y divide-gray-100 max-h-[540px] overflow-y-auto">
-        {loading && <p className="text-sm text-gray-400 text-center py-10">Loading…</p>}
-        {!loading && items?.length === 0 && <p className="text-sm text-gray-400 text-center py-10">No items found.</p>}
-        {!loading && items?.map(item => (
-          <AgendaItemRow key={item.item_id} item={item} showVoteBadge={false} />
-        ))}
-      </div>
-    </div>
-  )
-}
-
-// Click a member name → see all their votes grouped by category
-function MemberVoteProfile({ member, category, onBack }) {
-  const [allItems, setAllItems] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [voteFilter, setVoteFilter] = useState('')
-
-  useEffect(() => {
-    setLoading(true)
-    getMemberVoteItems(member.name, '', category)
-      .then(d => setAllItems(d.items || []))
-      .catch(() => setAllItems([]))
-      .finally(() => setLoading(false))
-  }, [member.name, category])
-
-  const shown = voteFilter ? (allItems || []).filter(i => i.vote === voteFilter) : (allItems || [])
-
-  const totals = {}
-  for (const i of (allItems || [])) totals[i.vote] = (totals[i.vote] || 0) + 1
-
-  const byCat = {}
-  for (const i of shown) {
-    const c = i.category || 'Other'
-    ;(byCat[c] = byCat[c] || []).push(i)
-  }
-  const sortedCats = Object.keys(byCat).sort()
-
-  return (
-    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-      <DrillBackHeader
-        onBack={onBack}
-        title={`${member.name} — All Votes`}
-        subtitle={`District ${member.district} · ${category || 'All categories'}${!loading && allItems ? ` · ${shown.length} items` : ''}`}
-      />
-
-      {!loading && allItems && allItems.length > 0 && (
-        <div className="px-5 py-2.5 border-b border-gray-100 flex gap-2 flex-wrap items-center">
-          <span className="text-xs text-gray-500 font-medium">Filter:</span>
-          <button
-            onClick={() => setVoteFilter('')}
-            className={`text-xs px-2.5 py-1 rounded-full border font-semibold ${!voteFilter ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'}`}
-          >
-            All ({allItems.length})
-          </button>
-          {['AYE', 'NAY', 'ABSTAIN', 'ABSENT'].filter(v => totals[v]).map(v => (
-            <button
-              key={v}
-              onClick={() => setVoteFilter(voteFilter === v ? '' : v)}
-              className={`text-xs px-2.5 py-1 rounded-full border font-semibold ${voteFilter === v ? (VOTE_COLORS[v]?.pill || '') : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'}`}
-            >
-              {VOTE_LABEL[v]} ({totals[v]})
-            </button>
-          ))}
-        </div>
-      )}
-
-      <div className="max-h-[540px] overflow-y-auto">
-        {loading && <p className="text-sm text-gray-400 text-center py-10">Loading…</p>}
-        {!loading && shown.length === 0 && <p className="text-sm text-gray-400 text-center py-10">No items found.</p>}
-        {!loading && sortedCats.map(cat => (
-          <div key={cat}>
-            <div className="px-5 py-2 bg-gray-50 border-y border-gray-100 flex items-center justify-between">
-              <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">{cat}</span>
-              <span className="text-xs text-gray-400">{byCat[cat].length} item{byCat[cat].length !== 1 ? 's' : ''}</span>
-            </div>
-            <div className="divide-y divide-gray-100">
-              {byCat[cat].map(item => (
-                <AgendaItemRow key={item.item_id} item={item} showVoteBadge={!voteFilter} />
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-// The main votes panel — table + drill-down state all in one place
-function CouncilVotesPanel({ members, loading }) {
-  // view: 'table' | 'profile' | 'count'
-  const [view, setView] = useState('table')
-  const [selectedMember, setSelectedMember] = useState(null)
-  const [selectedVoteType, setSelectedVoteType] = useState(null)
-
-  function openProfile(member) {
-    setSelectedMember(member)
-    setView('profile')
-  }
-
-  function openCountDrill(member, voteType) {
-    setSelectedMember(member)
-    setSelectedVoteType(voteType)
-    setView('count')
-  }
-
-  function backToTable() {
-    setView('table')
-    setSelectedMember(null)
-    setSelectedVoteType(null)
-  }
-
-  if (view === 'profile' && selectedMember) {
-    return <MemberVoteProfile member={selectedMember} category="" onBack={backToTable} />
-  }
-
-  if (view === 'count' && selectedMember && selectedVoteType) {
-    return <VoteCountDrillDown member={selectedMember} voteType={selectedVoteType} category="" onBack={backToTable} />
-  }
-
-  // Table view
-  if (loading) return <p className="text-sm text-gray-400 py-6 text-center">Loading votes…</p>
-  if (!members || members.length === 0) {
-    return (
-      <div className="text-center py-8 text-gray-400 text-sm">
-        <Users className="w-10 h-10 mx-auto mb-2 opacity-30" />
-        <p>No vote records found.</p>
-        <p className="text-xs mt-1">Vote data is extracted from meeting minutes during bulk import.</p>
-      </div>
-    )
-  }
-
-  return (
-    <>
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="px-5 py-3.5 border-b border-gray-100">
-          <h3 className="font-semibold text-gray-800">Vote Breakdown by Councilmember — All Development Items</h3>
-          <p className="text-xs text-gray-400 mt-0.5">Click a name to see all votes · click a count to see those specific items</p>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
-                <th className="px-4 py-2.5 text-left">Dist.</th>
-                <th className="px-4 py-2.5 text-left">Councilmember</th>
-                <th className="px-4 py-2.5 text-right">Ayes</th>
-                <th className="px-4 py-2.5 text-right">Nays</th>
-                <th className="px-4 py-2.5 text-right">Abstain</th>
-                <th className="px-4 py-2.5 text-right">Absent</th>
-                <th className="px-4 py-2.5 text-left min-w-28">Aye Rate</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {members.map(m => {
-                const total = (m.AYE || 0) + (m.NAY || 0) + (m.ABSTAIN || 0) + (m.ABSENT || 0)
-                const ayePct = pct(m.AYE || 0, total - (m.ABSENT || 0))
-                return (
-                  <tr key={`${m.name}|${m.district}`} className="hover:bg-gray-50">
-                    <td className="px-4 py-2.5">
-                      <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-fw-blue text-white text-xs font-bold">
-                        {m.district || '?'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2.5">
-                      <button
-                        type="button"
-                        onClick={() => openProfile(m)}
-                        className="font-medium text-blue-600 underline underline-offset-2 hover:text-blue-800 text-left cursor-pointer"
-                      >
-                        {m.name}
-                      </button>
-                    </td>
-                    <td className="px-4 py-2.5 text-right">
-                      {m.AYE > 0
-                        ? <button type="button" onClick={() => openCountDrill(m, 'AYE')} className="font-semibold text-green-700 underline underline-offset-2 hover:text-green-900 cursor-pointer tabular-nums">{m.AYE}</button>
-                        : <span className="text-gray-300 tabular-nums">0</span>}
-                    </td>
-                    <td className="px-4 py-2.5 text-right">
-                      {m.NAY > 0
-                        ? <button type="button" onClick={() => openCountDrill(m, 'NAY')} className="font-semibold text-red-600 underline underline-offset-2 hover:text-red-800 cursor-pointer tabular-nums">{m.NAY}</button>
-                        : <span className="text-gray-300 tabular-nums">0</span>}
-                    </td>
-                    <td className="px-4 py-2.5 text-right">
-                      {m.ABSTAIN > 0
-                        ? <button type="button" onClick={() => openCountDrill(m, 'ABSTAIN')} className="font-semibold text-yellow-600 underline underline-offset-2 hover:text-yellow-800 cursor-pointer tabular-nums">{m.ABSTAIN}</button>
-                        : <span className="text-gray-300 tabular-nums">0</span>}
-                    </td>
-                    <td className="px-4 py-2.5 text-right">
-                      {m.ABSENT > 0
-                        ? <button type="button" onClick={() => openCountDrill(m, 'ABSENT')} className="font-semibold text-gray-500 underline underline-offset-2 hover:text-gray-700 cursor-pointer tabular-nums">{m.ABSENT}</button>
-                        : <span className="text-gray-300 tabular-nums">0</span>}
-                    </td>
-                    <td className="px-4 py-2.5">
-                      <div className="flex items-center gap-2">
-                        <div className="flex-1 bg-gray-100 rounded-full h-2 min-w-16">
-                          <div className="bg-green-500 rounded-full h-2" style={{ width: `${ayePct}%` }} />
-                        </div>
-                        <span className="text-xs text-gray-500 w-8 text-right tabular-nums">{ayePct}%</span>
-                      </div>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </>
-  )
-}
-
 // ── Summary stat cards ────────────────────────────────────────────────────────
 function StatCard({ label, value, sub }) {
   return (
@@ -476,7 +177,6 @@ function ZoningList({ items }) {
 export default function TrendsView() {
   const [tab, setTab] = useState('overview')
   const [trendsData, setTrendsData] = useState(null)
-  const [votesData, setVotesData] = useState(null)
   const [summary, setSummary] = useState(null)
   const [zoning, setZoning] = useState([])
   const [loading, setLoading] = useState(true)
@@ -485,13 +185,11 @@ export default function TrendsView() {
     setLoading(true)
     Promise.all([
       getCategoryTrends(),
-      getVotesByMember(),
       getAnalyticsSummary(),
       getZoningActivity(),
     ])
-      .then(([trends, votes, sum, zon]) => {
+      .then(([trends, sum, zon]) => {
         setTrendsData(trends)
-        setVotesData(votes)
         setSummary(sum)
         setZoning(zon.items || [])
       })
@@ -559,7 +257,6 @@ const HIDDEN_CATEGORIES = new Set([
         <nav className="flex gap-0 -mb-px">
           {[
             { key: 'overview',     label: 'Category Trends', icon: BarChart2  },
-            { key: 'votes',        label: 'Council Votes',   icon: Users      },
             { key: 'zoning',       label: 'Zoning Cases',    icon: FileText   },
             { key: 'history',      label: 'History',         icon: Clock      },
             { key: 'import',       label: 'Import',          icon: Download   },
@@ -609,15 +306,6 @@ const HIDDEN_CATEGORIES = new Set([
               </div>
             ))}
           </div>
-        </div>
-      )}
-
-      {tab === 'votes' && (
-        <div className="space-y-4">
-          <CouncilVotesPanel
-            members={votesData?.members}
-            loading={loading && !votesData}
-          />
         </div>
       )}
 
@@ -771,38 +459,6 @@ function MethodologyPanel() {
           <p><strong>Zoning Cases tab:</strong> The Zoning Cases sub-tab in Trends shows all ZC- items in the database with their From/To designations, council district, and fiscal direction. Data comes from the same imported agenda items — the tab is a filtered view of the full item table.</p>
 
           <p><strong>By-right scenarios:</strong> For each proposed zone code, the app also shows what uses are permitted by-right (without additional approval) under that code, based on Fort Worth's Unified Development Code land use tables.</p>
-        </div>
-      ),
-    },
-    {
-      id: 'council-votes',
-      title: 'Council Votes — Sources & Accuracy',
-      color: 'red',
-      content: (
-        <div className="space-y-4 text-sm text-gray-700">
-          <p><strong>Where vote data comes from:</strong> Individual councilmember votes are extracted from official <strong>meeting minutes PDFs</strong> published by the City of Fort Worth on Legistar. The minutes are the only publicly available document that records how individual members voted on specific agenda items.</p>
-
-          <p><strong>How votes are parsed:</strong> The app scans minutes text line-by-line for motion results in Fort Worth's standard format:</p>
-          <div className="bg-gray-50 border border-gray-200 rounded p-3 font-mono text-xs">
-            Motion passed 9-2, Mayor Parker, Mayor Pro tem Flores, and Council Members Crain, Peoples, Hall, Nettles, Beck, Blaylock, and Martinez voted in support. Council Members Lauersdorf and Hill voted in opposition.
-          </div>
-          <p>Each motion is matched to the case reference number (M&C, ZC-, SP-, etc.) that precedes it in the minutes. The vote is then associated with the corresponding stored agenda item.</p>
-
-          <p><strong>YouTube transcript fallback (Import → Sync YouTube Votes):</strong> When minutes don't have a usable per-member breakdown, the app can pull the auto-generated caption transcript for the matching council meeting video from the City's official YouTube channel (@cityoffortworth) and scan it for vote language. It tracks the most recently spoken case reference, watches for "please vote," then looks in the surrounding ±10 second window for "motion carries/passed" vs. "motion fails/denied," and tries to pick out a spoken tally ("nine to two") or named dissenters ("Council Member Hill voting no") from that same window. This only fills in items that don't already have PDF-sourced minutes data — it never overwrites a minutes-based vote — and it is inherently less precise than the minutes PDF, since it depends on auto-caption accuracy and a fixed time window around the vote announcement.</p>
-
-          <p><strong>Unanimous votes (10-0 or 11-0):</strong> When no members voted in opposition, the minutes only say "Motion passed 10-0" or "Motion passed 11-0" — individual names are <em>not</em> listed. In these cases, the app assigns AYE to all members present and ABSENT to any member listed as absent in the meeting's attendance header. This means unanimous votes may be attributed to members who were actually absent if the attendance header was not parsed correctly.</p>
-
-          <p><strong>Known limitations:</strong></p>
-          <ul className="list-disc pl-5 space-y-1">
-            <li>Fort Worth uses <strong>electronic voting</strong>. Mayor Parker says "Please vote" and an electronic board records each member's button press. Individual votes are <em>not spoken aloud</em> during meetings, so video transcripts cannot be used to verify votes.</li>
-            <li>The only way to obtain certified individual vote records is a <strong>Public Information Request (PIR)</strong> to the City Secretary's office under the Texas Public Information Act. The City Secretary maintains the official electronic voting records.</li>
-            <li>Contested votes (with named dissenters) are accurate when the minutes follow the standard format. Some older minutes use non-standard phrasing and may not parse correctly.</li>
-            <li>The votes displayed represent <strong>votes on development-related agenda items only</strong> — not all city council votes. Members may have voted differently on non-development items not captured here.</li>
-          </ul>
-
-          <p><strong>Member district assignments:</strong> Each councilmember is assigned to their district using an internal lookup table (<code>vote_parser.py → _MEMBER_DISTRICT</code>) that includes both current and former members. Former members (Gyna Bivens, Jared Williams, Leonard Firestone, Cary Moon, etc.) are retained so their historical votes can be displayed.</p>
-
-          <p><strong>What "Aye Rate" means:</strong> The percentage of recorded votes (excluding absences) where the member voted in favor. A 100% aye rate on development items does not mean the member never dissented — it means no dissent was recorded on the development-related items tracked by this application.</p>
         </div>
       ),
     },
