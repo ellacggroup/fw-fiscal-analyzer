@@ -357,7 +357,7 @@ function MethodologyPanel() {
           <ul className="list-disc pl-5 space-y-1">
             <li><span className="font-semibold text-green-700">POSITIVE</span> — The proposed use is estimated to generate more revenue than it costs the city to serve (revenue-to-cost ratio ≥ 1.0, the value of <code>PARAMETERS.rc_ratio_target</code> in <code>fiscal_analyzer.py</code>).</li>
             <li><span className="font-semibold text-yellow-700">NEUTRAL</span> — Revenue and costs are roughly balanced (R/C ratio 0.85–1.0), or the item is procedural with no direct fiscal impact.</li>
-            <li><span className="font-semibold text-red-700">NEGATIVE</span> — The proposed use is estimated to cost more to serve than it generates in revenue (R/C ratio below 0.85). Incentive deals (tax abatements, TIRZ, Chapter 380 agreements) can also show NEGATIVE when the deal reduces the city's tax collection relative to the property's full assessed value — but that does not mean the incentive was a bad deal. Most incentive agreements exist because the development likely would not happen at all without them (a "but for" scenario): in that case the city is gaining revenue it otherwise would not have had, not losing revenue it would have collected anyway. Treat a NEGATIVE rating on an incentive item as a prompt to review the deal terms and the underlying "but for" case, not as a verdict that the incentive itself was the wrong call.</li>
+            <li><span className="font-semibold text-red-700">NEGATIVE</span> — The proposed use is estimated to cost more to serve than it generates in revenue (R/C ratio below 0.85). For incentive deals (tax abatements, TIRZ, Chapter 380 agreements), see the "but for" methodology below — the app does not treat every incentive as automatically negative.</li>
             <li><span className="font-semibold text-gray-500">UNKNOWN</span> — The item type does not permit a revenue/cost estimate from the agenda text alone (e.g., administrative resolutions, appointments).</li>
           </ul>
 
@@ -371,6 +371,28 @@ function MethodologyPanel() {
           <p><strong>Finance Director certification:</strong> Fort Worth M&C staff reports often include a section where the Director of Finance certifies whether the item has a positive, negative, or neutral impact on the General Fund. When this language is detected in uploaded staff reports, it overrides the rule-based estimate and the confidence is set to HIGH. This is the most authoritative fiscal statement in the app.</p>
 
           <p><strong>Category classification:</strong> Each item is classified into a development category by scoring keyword matches against the item title and description. The category with the highest keyword score wins. For example, an item containing "rezone," "zoning change," or "ZC-" is classified as Zoning Change. Items with "TIRZ," "tax increment reinvestment zone" are classified as TIRZ / Tax Increment (board appointments to TIRZ boards are excluded). The full keyword list is defined in <code>backend/services/fiscal_analyzer.py</code>.</p>
+        </div>
+      ),
+    },
+    {
+      id: 'incentives',
+      title: 'Economic Incentives & the "But For" Adjustment',
+      color: 'emerald',
+      content: (
+        <div className="space-y-4 text-sm text-gray-700">
+          <p><strong>The problem with a simple foregone-revenue calculation:</strong> A tax abatement, TIRZ, or Chapter 380 deal reduces what the city collects compared to the property's full assessed value — but comparing against that full value overstates the cost, because most incentive deals exist specifically because the development would not happen at all without them. If a parcel is vacant or underused today, the real question isn't "how much did the city give up versus the maximum," it's "how much better off is the city than it is right now, doing nothing."</p>
+
+          <p><strong>How the adjustment works:</strong> For every tax abatement, Chapter 380 agreement, or TIRZ item, the app first computes a conservative minimum-foregone-revenue estimate the same way it always has (see Ratings above). Then, if an address can be resolved for the item — either from the City's zoning/comp-plan GIS lookup or extracted directly from the item title — the app queries the <strong>Tarrant Appraisal District (TAD)</strong> for that parcel's <em>current</em> assessed value, and uses the tax on that current value as the real "do nothing" baseline instead of the hypothetical full post-development ceiling.</p>
+
+          <p><strong>Re-rating logic:</strong> The app compares what the city is actually projected to collect during the incentive period against that current-baseline tax:</p>
+          <ul className="list-disc pl-5 space-y-1">
+            <li>If the city nets <strong>more</strong> than the current baseline, the item is rated <span className="font-semibold text-green-700">POSITIVE</span> when the agenda text contains an explicit "but for" finding (see below), or <span className="font-semibold text-yellow-700">NEUTRAL</span> otherwise.</li>
+            <li>If the city nets <strong>less</strong> than the current baseline — a genuine loss even accounting for the counterfactual — the item stays <span className="font-semibold text-red-700">NEGATIVE</span>.</li>
+          </ul>
+
+          <p><strong>"But for" finding detection:</strong> Texas incentive law (Local Government Code Ch. 380/381, Tax Code Ch. 312) requires the city to find that a project would not occur without the incentive before approving it, so staff reports for these deals usually state this in writing (e.g., "but for this incentive, the applicant would not undertake this project in Fort Worth"). The app scans the agenda text for this language. When present, confidence is set to HIGH and it supports a POSITIVE rating; when absent, confidence is MEDIUM and the narrative flags that the M&C staff report should be checked for the required finding.</p>
+
+          <p><strong>When this doesn't apply:</strong> If no address can be resolved, or TAD has no record for the parcel, the app falls back to the original conservative estimate — it never guesses at a baseline value. Both the "foregone versus ceiling" and "net gain versus current baseline" figures are shown in the item's narrative when the adjustment runs, so nothing is hidden either way.</p>
         </div>
       ),
     },
@@ -583,6 +605,7 @@ function MethodologyPanel() {
     violet: { bg: 'bg-violet-50', border: 'border-violet-200',head: 'bg-violet-100',title: 'text-violet-900',dot: 'bg-violet-500' },
     cyan:   { bg: 'bg-cyan-50',   border: 'border-cyan-200',  head: 'bg-cyan-100',  title: 'text-cyan-900',  dot: 'bg-cyan-500'   },
     rose:   { bg: 'bg-rose-50',   border: 'border-rose-200',  head: 'bg-rose-100',  title: 'text-rose-900',  dot: 'bg-rose-500'   },
+    emerald:{ bg: 'bg-emerald-50',border: 'border-emerald-200',head: 'bg-emerald-100',title: 'text-emerald-900',dot: 'bg-emerald-500'},
   }
 
   return (

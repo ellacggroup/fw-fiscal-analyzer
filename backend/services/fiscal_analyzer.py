@@ -1520,6 +1520,95 @@ def _estimate_broader_development(land_use: str, acreage: float) -> Optional[dic
     return None  # No meaningful broader scenario
 
 
+# Texas incentive law (Local Gov't Code Ch. 380/381, Tax Code Ch. 312) requires
+# the city to find that a project would not occur without the incentive before
+# approving it — staff reports for these deals usually state this "but for"
+# finding explicitly.
+_BUT_FOR_RE = re.compile(
+    r'\bbut\s+for\s+(?:this|the)\s+(?:incentive|agreement|abatement|assistance|rebate)\b'
+    r'|\bwould\s+not\s+(?:otherwise\s+)?(?:occur|be\s+developed|be\s+undertaken|proceed|locate)\b.{0,40}\bwithout\b'
+    r'|\bwithout\s+(?:this|the)\s+(?:incentive|agreement|abatement)\b.{0,40}\bwould\s+not\b',
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _has_but_for_finding(text: str) -> bool:
+    return bool(_BUT_FOR_RE.search(text))
+
+
+def apply_but_for_adjustment(result: dict, baseline_assessed_value: Optional[int], item_text: str) -> dict:
+    """
+    Re-rate an economic incentive / TIRZ item (mutates and returns *result*)
+    using the correct "but for" counterfactual: what the city collects from
+    the parcel TODAY, per its current Tarrant Appraisal District assessed
+    value — not the hypothetical full-value ceiling _economic_incentive_analysis
+    uses as its baseline. Call only when a real TAD assessed value was found
+    for the parcel; a no-op otherwise so the conservative estimate stands.
+
+    Rationale: most incentive deals exist because the development would not
+    happen at all without them, so comparing against "what the city would
+    collect if the project were fully built with no deal" overstates the
+    loss. Comparing against the parcel's current (pre-development, often
+    vacant/underused) tax contribution shows the real "but for" gain.
+    """
+    if (
+        not baseline_assessed_value
+        or result.get("economic_incentive_type") is None
+        or result.get("year1_net_impact") is None
+    ):
+        # No baseline, no incentive deal, or no dollar figure was found in the
+        # agenda text to begin with — nothing to adjust. Comparing a $0
+        # placeholder (an absence of data, not a claim of zero revenue)
+        # against a real baseline would produce a false NEGATIVE.
+        return result
+
+    prop_tax_rate = PARAMETERS["property_tax_rate"]
+    baseline_annual_tax = round(baseline_assessed_value * prop_tax_rate)
+
+    year1_full_tax = result.get("year1_revenue_estimate") or 0   # ceiling: full post-development tax, no deal
+    year1_forgone  = result.get("year1_net_impact") or 0          # negative: amount abated/rebated off that ceiling
+    year1_with_deal = year1_full_tax + year1_forgone              # what the city actually collects during the deal
+
+    net_vs_baseline = year1_with_deal - baseline_annual_tax
+    has_but_for = _has_but_for_finding(item_text)
+
+    if net_vs_baseline > 0:
+        new_rating = "POSITIVE" if has_but_for else "NEUTRAL"
+    elif net_vs_baseline == 0:
+        new_rating = "NEUTRAL"
+    else:
+        new_rating = "NEGATIVE"
+
+    result["fiscal_impact_rating"]      = new_rating
+    result["but_for_applied"]           = True
+    result["but_for_finding_present"]   = has_but_for
+    result["baseline_assessed_value"]   = baseline_assessed_value
+    result["baseline_annual_tax"]       = baseline_annual_tax
+    result["net_new_revenue_vs_baseline"] = net_vs_baseline
+    result["confidence"]                = "HIGH" if has_but_for else "MEDIUM"
+
+    but_for_note = (
+        f" \"But for\" analysis: per Tarrant Appraisal District, this parcel's current assessed "
+        f"value generates approximately ${baseline_annual_tax:,.0f}/year in city property tax "
+        f"today. Even with the incentive, the city is projected to collect about "
+        f"${year1_with_deal:,.0f}/year during the incentive period — "
+        + (f"a net gain of ${net_vs_baseline:,.0f}/year versus doing nothing."
+           if net_vs_baseline >= 0 else
+           f"a net loss of ${abs(net_vs_baseline):,.0f}/year versus what the parcel already generates.")
+        + (" The agenda text includes a finding that this development would not occur without "
+           "the incentive, supporting this comparison."
+           if has_but_for else
+           " No explicit \"but for\" finding was detected in the agenda text — verify the M&C "
+           "staff report contains the required finding before relying on this framing.")
+    )
+    result["analysis_narrative"] = (result.get("analysis_narrative") or "") + but_for_note
+    result["key_revenue_sources"] = list(result.get("key_revenue_sources") or []) + [
+        "Net new revenue vs. current (pre-development) tax baseline"
+    ]
+
+    return result
+
+
 def _economic_incentive_analysis(dollar_amount: Optional[float], title: str, description: str) -> dict:
     text = (title + " " + description).lower()
 
