@@ -1,6 +1,8 @@
 """Historical tracking / analytics endpoints."""
 import json
 import re
+from datetime import datetime
+from typing import Optional
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -9,6 +11,19 @@ from services.vote_parser import _normalize_name, _MEMBER_DISTRICT
 from services.fiscal_analyzer import DEVELOPMENT_CATEGORIES
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
+
+
+def _parse_meeting_date(date_str: str) -> Optional[datetime]:
+    """Meeting dates are stored as either 'January 16, 2024' or ISO 'YYYY-MM-DD'."""
+    if not date_str:
+        return None
+    try:
+        parts = date_str.replace(",", "").split()
+        if len(parts) == 3:
+            return datetime.strptime(date_str.replace(",", ""), "%B %d %Y")
+        return datetime.fromisoformat(date_str[:10])
+    except Exception:
+        return None
 
 
 def _extract_district(title: str, description: str) -> str | None:
@@ -42,8 +57,8 @@ def get_summary(db: Session = Depends(get_db)):
             by_district[district] = by_district.get(district, 0) + 1
 
     dates = sorted(
-        [u.meeting_date for u in uploads if u.meeting_date],
-        key=lambda d: d or ""
+        (u.meeting_date for u in uploads if u.meeting_date),
+        key=lambda d: _parse_meeting_date(d) or datetime.min,
     )
 
     return {
@@ -358,18 +373,8 @@ def get_category_trends(db: Session = Depends(get_db)):
         date = upload.meeting_date or ""
         if not date:
             continue
-        # Parse date to quarter string like "2023-Q2"
-        try:
-            parts = date.replace(",", "").split()
-            if len(parts) == 3:
-                # "January 16, 2024" or already numeric
-                from datetime import datetime as dt
-                d = dt.strptime(date.replace(",", ""), "%B %d %Y")
-            else:
-                d = dt.fromisoformat(date[:10])
-            quarter = f"{d.year}-Q{(d.month - 1) // 3 + 1}"
-        except Exception:
-            quarter = date[:7]  # fallback: YYYY-MM
+        d = _parse_meeting_date(date)
+        quarter = f"{d.year}-Q{(d.month - 1) // 3 + 1}" if d else date[:7]
 
         cat = item.category or "Other"
         if quarter not in by_quarter:
