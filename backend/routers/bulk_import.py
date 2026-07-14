@@ -22,7 +22,7 @@ from database import (
 )
 from services.legistar_scraper import get_council_meetings, fetch_pdf_bytes_lenient
 from services.pdf_parser import detect_meeting_date, extract_agenda_items, extract_text_from_pdf
-from services.fiscal_analyzer import analyze_fiscal_impact
+from services.fiscal_analyzer import analyze_fiscal_impact, DEVELOPMENT_CATEGORIES
 from services.claude_analyzer import analyze_items_with_claude, claude_available
 from services.vote_parser import associate_votes_to_items, summarize_votes, extract_districts_from_ref
 from services.alert_matcher import run_alert_matching
@@ -33,26 +33,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/bulk-import", tags=["bulk-import"])
 
 # ── Target categories — all items that affect real estate or RE development ───
-RELEVANT_CATEGORIES = {
-    # Core development approvals
-    "Zoning Change",
-    "Site Plan / Plat",
-    "Platting",
-    "Land Use / Comp Plan",
-    # Financial tools
-    "Economic Incentive",
-    "Development Agreement",
-    "TIRZ / Tax Increment",
-    "Public Improvement District",
-    "Impact / Development Fees",
-    # Property and infrastructure
-    "Annexation",
-    "Right-of-Way / Easement",
-    "Land Acquisition / Disposition",
-    "Utility Extension / Infrastructure",
-    # Regulatory
-    "Development Code / Standards",
-}
+# Shared with routers/agendas.py via services.fiscal_analyzer.DEVELOPMENT_CATEGORIES
+# so manual upload, reanalysis, and bulk import all apply the same scope.
+RELEVANT_CATEGORIES = DEVELOPMENT_CATEGORIES
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────

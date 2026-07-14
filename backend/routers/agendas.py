@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from database import AgendaItem, AgendaUpload, get_db
 from services.claude_analyzer import analyze_items_with_claude, claude_available
-from services.fiscal_analyzer import analyze_fiscal_impact
+from services.fiscal_analyzer import analyze_fiscal_impact, DEVELOPMENT_CATEGORIES
 from services.pdf_parser import detect_meeting_date, extract_agenda_items, extract_text_from_pdf
 from services.url_fetcher import fetch_pdf_from_url
 from services.comprehensive_plan import lookup_comprehensive_plan, is_real_estate_item
@@ -222,6 +222,13 @@ async def reanalyze_all_agendas(db: Session = Depends(get_db)):
             claude_analyses = analyze_items_with_claude(raw_items, upload.meeting_date, rule_analyses)
             using_claude    = claude_available()
 
+            # Preserve votes and districts before replacing items (reanalysis must not wipe vote data)
+            existing_votes = {
+                item.item_number: {"votes": item.votes, "districts": item.districts}
+                for item in db.query(AgendaItem).filter(AgendaItem.upload_id == upload.id).all()
+                if item.item_number
+            }
+
             db.query(AgendaItem).filter(AgendaItem.upload_id == upload.id).delete()
             db.commit()
 
@@ -245,17 +252,23 @@ async def reanalyze_all_agendas(db: Session = Depends(get_db)):
                         merged["fiscal_impact_rating"] = rule["fiscal_impact_rating"]
 
                 cat = _infer_category_label(merged, item_data.get("section", ""))
+                if cat not in DEVELOPMENT_CATEGORIES:
+                    continue
                 if is_real_estate_item(cat, item_data.get("title", ""), item_data.get("description", "")):
                     await asyncio.to_thread(_enrich_with_gis, merged, item_data, cat)
 
+                item_num = item_data.get("item_number")
+                prior = existing_votes.get(item_num, {})
                 db_item = AgendaItem(
                     upload_id=upload.id,
-                    item_number=item_data.get("item_number"),
+                    item_number=item_num,
                     title=item_data.get("title", ""),
                     description=item_data.get("description", ""),
                     section=item_data.get("section", ""),
                     category=cat,
                     analysis=merged,
+                    votes=prior.get("votes"),
+                    districts=prior.get("districts"),
                 )
                 db.add(db_item)
                 count += 1
@@ -328,6 +341,8 @@ async def reanalyze_agenda(upload_id: int, db: Session = Depends(get_db)):
                 merged["fiscal_impact_rating"] = rule["fiscal_impact_rating"]
 
         cat = _infer_category_label(merged, item_data.get("section", ""))
+        if cat not in DEVELOPMENT_CATEGORIES:
+            continue
         if is_real_estate_item(cat, item_data.get("title", ""), item_data.get("description", "")):
             await asyncio.to_thread(_enrich_with_gis, merged, item_data, cat)
 

@@ -251,6 +251,33 @@ _CATEGORY_KEYWORDS = {
     ],
 }
 
+# ---------------------------------------------------------------------------
+# Categories that count as "development" for storage, trends, and vote
+# tracking. Everything else (ordinances, budget amendments, contracts,
+# personnel, administrative business, general infrastructure/policy items)
+# is out of scope for this tool's cross-meeting analysis. Bulk import and
+# reanalysis (single + all) filter against this set so an item can't sneak
+# into vote/category data via reanalysis after being correctly excluded at
+# import time. A manually-uploaded single PDF is exempt — that flow is for
+# browsing one full agenda, not feeding cross-meeting trends.
+# ---------------------------------------------------------------------------
+DEVELOPMENT_CATEGORIES = {
+    "Zoning Change",
+    "Site Plan / Plat",
+    "Platting",
+    "Land Use / Comp Plan",
+    "Economic Incentive",
+    "Development Agreement",
+    "TIRZ / Tax Increment",
+    "Public Improvement District",
+    "Impact / Development Fees",
+    "Annexation",
+    "Right-of-Way / Easement",
+    "Land Acquisition / Disposition",
+    "Utility Extension / Infrastructure",
+    "Development Code / Standards",
+}
+
 _LAND_USE_KEYWORDS = {
     "Single-Family Residential": [
         "single-family", "single family", "sfr", "residential", "homes",
