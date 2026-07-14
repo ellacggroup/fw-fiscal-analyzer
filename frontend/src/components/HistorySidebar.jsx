@@ -10,6 +10,18 @@ export default function HistorySidebar({ agendas, currentId, onSelect, onReanaly
 
   if (!agendas.length) return null
 
+  // Sort by the actual meeting date (not when it was imported) so daily
+  // auto-import — which can pull in a meeting well after it happened —
+  // doesn't push it out of chronological order. Falls back to upload
+  // time if a meeting date is missing or unparseable.
+  function sortableDate(a) {
+    if (a.meeting_date) {
+      const d = new Date(a.meeting_date)
+      if (!isNaN(d)) return d
+    }
+    return new Date(a.uploaded_at)
+  }
+
   const filtered = (search.trim()
     ? agendas.filter(a =>
         (a.filename || '').toLowerCase().includes(search.toLowerCase()) ||
@@ -17,8 +29,8 @@ export default function HistorySidebar({ agendas, currentId, onSelect, onReanaly
       )
     : [...agendas]
   ).sort((a, b) => {
-    const da = new Date(a.uploaded_at)
-    const db = new Date(b.uploaded_at)
+    const da = sortableDate(a)
+    const db = sortableDate(b)
     return sortDir === 'desc' ? db - da : da - db
   })
 
@@ -119,7 +131,7 @@ export default function HistorySidebar({ agendas, currentId, onSelect, onReanaly
                 <div className="flex items-center gap-1 mt-1">
                   <Clock className="w-3 h-3 text-gray-400" />
                   <span className="text-xs text-gray-400">
-                    {new Date(a.uploaded_at).toLocaleDateString()}
+                    {a.meeting_date || new Date(a.uploaded_at).toLocaleDateString()}
                   </span>
                   <span className="ml-auto text-xs text-gray-500">{a.item_count} items</span>
                 </div>
