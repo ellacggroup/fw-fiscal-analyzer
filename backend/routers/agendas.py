@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import APIRouter, Body, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 
@@ -134,7 +136,7 @@ async def _process_pdf(
     for i, (item_data, merged) in enumerate(zip(raw_items, merged_analyses)):
         cat = _infer_category_label(merged, item_data.get("section", ""))
         if is_real_estate_item(cat, item_data.get("title", ""), item_data.get("description", "")):
-            _enrich_with_gis(merged, item_data, cat)
+            await asyncio.to_thread(_enrich_with_gis, merged, item_data, cat)
 
     # Persist
     upload = AgendaUpload(
@@ -244,7 +246,7 @@ async def reanalyze_all_agendas(db: Session = Depends(get_db)):
 
                 cat = _infer_category_label(merged, item_data.get("section", ""))
                 if is_real_estate_item(cat, item_data.get("title", ""), item_data.get("description", "")):
-                    _enrich_with_gis(merged, item_data, cat)
+                    await asyncio.to_thread(_enrich_with_gis, merged, item_data, cat)
 
                 db_item = AgendaItem(
                     upload_id=upload.id,
@@ -327,7 +329,7 @@ async def reanalyze_agenda(upload_id: int, db: Session = Depends(get_db)):
 
         cat = _infer_category_label(merged, item_data.get("section", ""))
         if is_real_estate_item(cat, item_data.get("title", ""), item_data.get("description", "")):
-            _enrich_with_gis(merged, item_data, cat)
+            await asyncio.to_thread(_enrich_with_gis, merged, item_data, cat)
 
         item_num = item_data.get("item_number")
         prior = existing_votes.get(item_num, {})
