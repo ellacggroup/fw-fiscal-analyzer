@@ -1837,6 +1837,107 @@ def _dispatch(
 # ---------------------------------------------------------------------------
 # Land-use analysis (Annexation / Zoning / Development)
 # ---------------------------------------------------------------------------
+def _compute_service_cost_breakdown(land_use: str, assumed_acreage: float, acreage_is_assumed: bool) -> Optional[dict]:
+    """
+    Supplementary, itemized cost/revenue estimate built bottom-up from
+    Fort Worth's per-capita/per-unit service cost parameters and average
+    assessed values (PARAMETERS), combined with each land-use type's
+    population/lane-mile/parks-acreage density assumptions already present
+    in LAND_USE_PROTOTYPES.
+
+    This is NOT used to set fiscal_impact_rating — the rating is still
+    driven entirely by the flat per-acre revenue/cost table. This exists
+    so the two methodologies (flat per-acre prototype vs. itemized
+    per-service-line estimate) can be shown side by side and compared,
+    rather than one silently overriding the other.
+    """
+    proto = LAND_USE_PROTOTYPES.get(land_use)
+    if not proto or proto.get("population_per_acre") is None:
+        return None
+
+    population  = round(assumed_acreage * proto["population_per_acre"], 1)
+    lane_miles  = round(assumed_acreage * proto["lane_miles_per_acre"], 3)
+    parks_acres = round(assumed_acreage * proto["parks_acres_per_acre"], 3)
+
+    police_cost       = population * PARAMETERS["police_cost_per_capita"]
+    fire_ems_cost     = population * PARAMETERS["fire_ems_cost_per_capita"]
+    public_works_cost = lane_miles * PARAMETERS["public_works_per_lane_mile"]
+    parks_cost        = parks_acres * PARAMETERS["parks_per_acre"]
+    direct_cost       = police_cost + fire_ems_cost + public_works_cost + parks_cost
+    admin_overhead    = direct_cost * PARAMETERS["admin_overhead_pct"]
+    itemized_cost     = round(direct_cost + admin_overhead)
+
+    # Revenue side is only estimable for residential uses, where a unit
+    # count can be backed out of population ÷ average household size
+    # (2.4, the same assumption already used elsewhere in this file).
+    # Commercial/office/industrial revenue would need a stated square
+    # footage — there's no defensible way to derive that from acreage
+    # alone, so it's left out rather than inventing a floor-area-ratio.
+    units_est = None
+    itemized_revenue = None
+    revenue_basis = None
+    if "Residential" in land_use and population:
+        units_est = round(population / 2.4)
+        avg_value = PARAMETERS["avg_mf_unit_value"] if "Multifamily" in land_use else PARAMETERS["avg_sfr_value"]
+        itemized_revenue = round(units_est * avg_value * PARAMETERS["property_tax_rate"])
+        revenue_basis = (
+            f"{units_est} estimated units x ${avg_value:,.0f} average assessed value x "
+            f"{PARAMETERS['property_tax_rate'] * 100:.4f}% city tax rate"
+        )
+
+    prototype_cost = round((proto.get("cost_per_acre_yr1") or 0) * assumed_acreage)
+    cost_variance = itemized_cost - prototype_cost
+    cost_variance_pct = round((cost_variance / prototype_cost) * 100) if prototype_cost else None
+
+    return {
+        "population_estimate":              population,
+        "lane_miles_estimate":               lane_miles,
+        "parks_acres_estimate":              parks_acres,
+        "police_cost":                       round(police_cost),
+        "fire_ems_cost":                     round(fire_ems_cost),
+        "public_works_cost":                 round(public_works_cost),
+        "parks_cost":                        round(parks_cost),
+        "admin_overhead_cost":               round(admin_overhead),
+        "itemized_cost_total":               itemized_cost,
+        "prototype_cost_for_comparison":     prototype_cost,
+        "cost_variance_vs_prototype":        cost_variance,
+        "cost_variance_vs_prototype_pct":    cost_variance_pct,
+        "units_estimate":                    units_est,
+        "itemized_revenue_total":            itemized_revenue,
+        "itemized_revenue_basis":            revenue_basis,
+        "acreage_is_assumed":                acreage_is_assumed,
+    }
+
+
+def _service_cost_narrative(b: dict) -> str:
+    parts = [
+        f"Supplementary itemized estimate: at this density, approximately {b['population_estimate']:,.1f} "
+        f"residents, {b['lane_miles_estimate']:.2f} lane-miles, and {b['parks_acres_estimate']:.2f} acres "
+        f"of parkland demand — costing an estimated ${b['police_cost']:,.0f} (police) + "
+        f"${b['fire_ems_cost']:,.0f} (fire/EMS) + ${b['public_works_cost']:,.0f} (public works) + "
+        f"${b['parks_cost']:,.0f} (parks), plus ${b['admin_overhead_cost']:,.0f} administrative "
+        f"overhead — ${b['itemized_cost_total']:,.0f}/year total."
+    ]
+    if b["prototype_cost_for_comparison"]:
+        direction = "higher" if b["cost_variance_vs_prototype"] > 0 else "lower"
+        parts.append(
+            f" That is ${abs(b['cost_variance_vs_prototype']):,.0f}/year "
+            f"({abs(b['cost_variance_vs_prototype_pct'] or 0)}%) {direction} than the flat per-acre "
+            f"prototype cost used for the official rating above (${b['prototype_cost_for_comparison']:,.0f}/year)."
+        )
+    if b["itemized_revenue_total"] is not None:
+        parts.append(
+            f" Revenue side: {b['itemized_revenue_basis']} -> an estimated "
+            f"${b['itemized_revenue_total']:,.0f}/year in property tax."
+        )
+    else:
+        parts.append(
+            " Revenue side of this itemized estimate isn't available for this land-use type without "
+            "a stated unit count or square footage in the agenda text."
+        )
+    return "".join(parts)
+
+
 def _land_use_analysis(
     category: str,
     land_use: str,
@@ -1926,6 +2027,8 @@ def _land_use_analysis(
     if not acreage:
         narrative += " Note: acreage not detected in agenda text — estimate assumes 1 acre."
 
+    service_cost_breakdown = _compute_service_cost_breakdown(land_use, assumed_acreage, not bool(acreage))
+
     return {
         "fiscal_impact_rating": rating,
         "confidence": confidence,
@@ -1940,6 +2043,8 @@ def _land_use_analysis(
         "infrastructure_requirements": infra,
         "units_or_sqft_estimate": units_est,
         "analysis_narrative": narrative,
+        "service_cost_breakdown": service_cost_breakdown,
+        "service_cost_narrative": _service_cost_narrative(service_cost_breakdown) if service_cost_breakdown else None,
         "caveats": (
             "Estimates use per-acre prototype values calibrated to Fort Worth conditions. "
             "Actual fiscal impact depends on final development program, market value at "

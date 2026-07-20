@@ -445,6 +445,24 @@ function MethodologyPanel() {
       ),
     },
     {
+      id: 'service-cost-breakdown',
+      title: 'Supplementary Itemized Cost Estimate',
+      color: 'cyan',
+      content: (
+        <div className="space-y-4 text-sm text-gray-700">
+          <p><strong>What this is:</strong> Every zoning or development-agreement item with a land-use type and acreage now shows a second, independent cost estimate alongside the official rating — built bottom-up from Fort Worth's per-resident and per-lane-mile service cost assumptions instead of the flat per-acre prototype table above. It appears as a collapsible "Supplementary itemized cost estimate" section on each item.</p>
+
+          <p><strong>How it's calculated:</strong> Each land-use type already carries an assumed population, lane-mile, and parkland-acreage density per acre (used elsewhere for infrastructure notes). The itemized estimate multiplies that density by acreage, then applies Fort Worth's per-capita/per-unit cost assumptions: $350/resident for police, $180/resident for fire and EMS, $800 per lane-mile for public works, $12,000 per acre for parks, plus 15% administrative overhead on top.</p>
+
+          <p><strong>Revenue side:</strong> For residential land uses only, a unit count is backed out of the estimated population (÷ 2.4, an average household size), then multiplied by Fort Worth's average assessed value for that unit type ($280,000 single-family, $140,000 multifamily) and the city's actual property tax rate (0.7125%). Commercial, office, and industrial uses don't get an itemized revenue figure — deriving a square footage from acreage alone would require inventing a floor-area-ratio assumption not backed by real data, so it's left blank rather than guessed.</p>
+
+          <p><strong>Why two methodologies instead of one:</strong> The flat per-acre prototype table and this itemized model can disagree significantly — in testing, commercial retail came out roughly 98% <em>lower</em> cost under the itemized model (near-zero population means near-zero police/fire demand), while multifamily came out roughly 255% <em>higher</em> (higher population density drives real per-resident service costs the flat table doesn't fully capture). That's expected: they're measuring cost two different ways, not one being "more correct." The rating itself is still set entirely by the flat per-acre table — this section is a transparency and cross-check tool, not a replacement.</p>
+
+          <p><strong>Limitations:</strong> The density assumptions (population/lane-miles/parks-acreage per acre) are the same fixed per-land-use-type figures used throughout the app, not specific to any individual project's actual density. Neither number is a substitute for an actual staff-report fiscal analysis.</p>
+        </div>
+      ),
+    },
+    {
       id: '40yr-projection',
       title: '40-Year NPV Projection',
       color: 'orange',

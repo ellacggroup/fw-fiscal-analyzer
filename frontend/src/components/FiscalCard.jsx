@@ -431,6 +431,38 @@ export default function FiscalCard({ item }) {
             )}
           </div>
 
+          {/* Supplementary itemized cost/revenue estimate — separate methodology, not used for the rating above */}
+          {analysis.service_cost_breakdown && (
+            <details className="group">
+              <summary className="text-xs font-semibold text-gray-500 cursor-pointer hover:text-gray-700 list-none flex items-center gap-1">
+                <ChevronDown className="w-3 h-3 group-open:rotate-180 transition-transform" />
+                Supplementary itemized cost estimate (police/fire/public works/parks)
+              </summary>
+              <div className="mt-2 space-y-3 bg-gray-50 border border-gray-200 rounded-lg p-3">
+                <p className="text-xs text-gray-500 leading-relaxed">
+                  This is a second, independent estimate built bottom-up from per-resident and
+                  per-lane-mile service costs, shown for comparison — it does <strong>not</strong> drive
+                  the rating above, which uses the flat per-acre model.
+                </p>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                  <DetailRow label="Police" value={fmt(analysis.service_cost_breakdown.police_cost)} />
+                  <DetailRow label="Fire/EMS" value={fmt(analysis.service_cost_breakdown.fire_ems_cost)} />
+                  <DetailRow label="Public Works" value={fmt(analysis.service_cost_breakdown.public_works_cost)} />
+                  <DetailRow label="Parks" value={fmt(analysis.service_cost_breakdown.parks_cost)} />
+                </div>
+                <DetailRow label="Admin overhead" value={fmt(analysis.service_cost_breakdown.admin_overhead_cost)} />
+                <DetailRow label="Itemized cost total" value={fmt(analysis.service_cost_breakdown.itemized_cost_total)} bold />
+                <DetailRow label="Flat per-acre cost (official rating basis)" value={fmt(analysis.service_cost_breakdown.prototype_cost_for_comparison)} />
+                {analysis.service_cost_breakdown.itemized_revenue_total != null && (
+                  <DetailRow label="Itemized revenue estimate" value={fmt(analysis.service_cost_breakdown.itemized_revenue_total)} />
+                )}
+                <p className="text-xs text-gray-600 leading-relaxed pt-1 border-t border-gray-200">
+                  {analysis.service_cost_narrative}
+                </p>
+              </div>
+            </details>
+          )}
+
           {/* Description */}
           {item.description && (
             <details className="group">
