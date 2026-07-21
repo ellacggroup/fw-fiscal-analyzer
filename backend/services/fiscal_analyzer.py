@@ -1279,6 +1279,31 @@ def analyze_fiscal_impact(item: dict) -> dict:
             log.write_text(traceback.format_exc())
             result["zoning_error"] = str(_exc)
 
+    # Supplementary itemized cost breakdown — computed LAST, after any zoning
+    # incremental override above, so its comparison baseline matches whatever
+    # number actually ended up driving the rating (year1_cost_estimate).
+    # Computing this earlier (inside _land_use_analysis, before the zoning
+    # incremental recalculation) compared against the wrong baseline for any
+    # zoning item with a parsed From/To — the absolute per-acre cost of the
+    # proposed use, not the incremental cost of the change that the rating
+    # actually uses.
+    if category in ("Zoning Change", "Development Agreement"):
+        land_use = result.get("land_use_type")
+        if land_use and land_use != "N/A":
+            assumed_acres_final = acreage or 1.0
+            breakdown = _compute_service_cost_breakdown(land_use, assumed_acres_final, not bool(acreage))
+            if breakdown:
+                actual_cost = result.get("year1_cost_estimate")
+                if actual_cost is not None:
+                    breakdown["prototype_cost_for_comparison"] = round(actual_cost)
+                    variance = breakdown["itemized_cost_total"] - round(actual_cost)
+                    breakdown["cost_variance_vs_prototype"] = variance
+                    breakdown["cost_variance_vs_prototype_pct"] = (
+                        round((variance / actual_cost) * 100) if actual_cost else None
+                    )
+                result["service_cost_breakdown"] = breakdown
+                result["service_cost_narrative"] = _service_cost_narrative(breakdown)
+
     return result
 
 
@@ -1845,11 +1870,16 @@ def _compute_service_cost_breakdown(land_use: str, assumed_acreage: float, acrea
     population/lane-mile/parks-acreage density assumptions already present
     in LAND_USE_PROTOTYPES.
 
-    This is NOT used to set fiscal_impact_rating — the rating is still
-    driven entirely by the flat per-acre revenue/cost table. This exists
-    so the two methodologies (flat per-acre prototype vs. itemized
-    per-service-line estimate) can be shown side by side and compared,
-    rather than one silently overriding the other.
+    This never sets fiscal_impact_rating itself. Called from
+    analyze_fiscal_impact() at the very end (after any zoning incremental
+    override), with the caller responsible for pointing
+    prototype_cost_for_comparison at whatever figure actually drove the
+    rating — the flat per-acre cost for most items, but the incremental
+    from/to cost for zoning changes with a recognized designation. Getting
+    that comparison baseline wrong (comparing against the flat figure when
+    the rating actually used the incremental one) was a real bug caught
+    after deploy — the two numbers on screen must always be checkable
+    against each other.
     """
     proto = LAND_USE_PROTOTYPES.get(land_use)
     if not proto or proto.get("population_per_acre") is None:
@@ -1922,8 +1952,10 @@ def _service_cost_narrative(b: dict) -> str:
         direction = "higher" if b["cost_variance_vs_prototype"] > 0 else "lower"
         parts.append(
             f" That is ${abs(b['cost_variance_vs_prototype']):,.0f}/year "
-            f"({abs(b['cost_variance_vs_prototype_pct'] or 0)}%) {direction} than the flat per-acre "
-            f"prototype cost used for the official rating above (${b['prototype_cost_for_comparison']:,.0f}/year)."
+            f"({abs(b['cost_variance_vs_prototype_pct'] or 0)}%) {direction} than the "
+            f"${b['prototype_cost_for_comparison']:,.0f}/year cost figure used for the official rating above "
+            f"(for zoning changes with a recognized from/to, that figure is the incremental cost of the "
+            f"change, not the flat per-acre cost of the new use alone)."
         )
     if b["itemized_revenue_total"] is not None:
         parts.append(
@@ -2027,8 +2059,6 @@ def _land_use_analysis(
     if not acreage:
         narrative += " Note: acreage not detected in agenda text — estimate assumes 1 acre."
 
-    service_cost_breakdown = _compute_service_cost_breakdown(land_use, assumed_acreage, not bool(acreage))
-
     return {
         "fiscal_impact_rating": rating,
         "confidence": confidence,
@@ -2043,8 +2073,6 @@ def _land_use_analysis(
         "infrastructure_requirements": infra,
         "units_or_sqft_estimate": units_est,
         "analysis_narrative": narrative,
-        "service_cost_breakdown": service_cost_breakdown,
-        "service_cost_narrative": _service_cost_narrative(service_cost_breakdown) if service_cost_breakdown else None,
         "caveats": (
             "Estimates use per-acre prototype values calibrated to Fort Worth conditions. "
             "Actual fiscal impact depends on final development program, market value at "

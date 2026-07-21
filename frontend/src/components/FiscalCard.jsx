@@ -442,7 +442,9 @@ export default function FiscalCard({ item }) {
                 <p className="text-xs text-gray-500 leading-relaxed">
                   This is a second, independent estimate built bottom-up from per-resident and
                   per-lane-mile service costs, shown for comparison — it does <strong>not</strong> drive
-                  the rating above, which uses the flat per-acre model.
+                  the rating above. (For zoning changes, the rating above is often based on the
+                  incremental cost of the change, not a flat per-acre figure — see "Cost used for
+                  official rating" below for the actual number being compared against.)
                 </p>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
                   <DetailRow label="Police" value={fmt(analysis.service_cost_breakdown.police_cost)} />
@@ -452,7 +454,7 @@ export default function FiscalCard({ item }) {
                 </div>
                 <DetailRow label="Admin overhead" value={fmt(analysis.service_cost_breakdown.admin_overhead_cost)} />
                 <DetailRow label="Itemized cost total" value={fmt(analysis.service_cost_breakdown.itemized_cost_total)} bold />
-                <DetailRow label="Flat per-acre cost (official rating basis)" value={fmt(analysis.service_cost_breakdown.prototype_cost_for_comparison)} />
+                <DetailRow label="Cost used for official rating" value={fmt(analysis.service_cost_breakdown.prototype_cost_for_comparison)} />
                 {analysis.service_cost_breakdown.itemized_revenue_total != null && (
                   <DetailRow label="Itemized revenue estimate" value={fmt(analysis.service_cost_breakdown.itemized_revenue_total)} />
                 )}
