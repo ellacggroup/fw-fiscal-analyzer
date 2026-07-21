@@ -7,7 +7,9 @@ from sqlalchemy.orm import Session
 
 from database import AgendaItem, AgendaUpload, get_db
 from services.claude_analyzer import analyze_items_with_claude, claude_available
-from services.fiscal_analyzer import analyze_fiscal_impact, apply_but_for_adjustment, DEVELOPMENT_CATEGORIES
+from services.fiscal_analyzer import (
+    analyze_fiscal_impact, apply_but_for_adjustment, apply_tad_current_value, DEVELOPMENT_CATEGORIES,
+)
 from services.pdf_parser import detect_meeting_date, extract_agenda_items, extract_text_from_pdf
 from services.url_fetcher import fetch_pdf_from_url
 from services.comprehensive_plan import lookup_comprehensive_plan, is_real_estate_item
@@ -107,6 +109,7 @@ async def _process_pdf(
         if is_real_estate_item(cat, item_data.get("title", ""), item_data.get("description", "")):
             await asyncio.to_thread(_enrich_with_gis, rule, item_data, cat)
         await asyncio.to_thread(_enrich_incentive_with_baseline, rule, item_data)
+        await asyncio.to_thread(_enrich_zoning_comparison_with_tad, rule, item_data)
 
     # Claude analysis (optional; batched) — pass GIS-enriched rule analyses for
     # context. This is a blocking network call, so it's offloaded to a worker
@@ -241,6 +244,7 @@ async def reanalyze_all_agendas(db: Session = Depends(get_db)):
                 if is_real_estate_item(cat, item_data.get("title", ""), item_data.get("description", "")):
                     await asyncio.to_thread(_enrich_with_gis, rule, item_data, cat)
                 await asyncio.to_thread(_enrich_incentive_with_baseline, rule, item_data)
+                await asyncio.to_thread(_enrich_zoning_comparison_with_tad, rule, item_data)
 
             claude_analyses = await asyncio.to_thread(
                 analyze_items_with_claude, raw_items, upload.meeting_date, rule_analyses,
@@ -339,6 +343,7 @@ async def reanalyze_agenda(upload_id: int, db: Session = Depends(get_db)):
         if is_real_estate_item(cat, item_data.get("title", ""), item_data.get("description", "")):
             await asyncio.to_thread(_enrich_with_gis, rule, item_data, cat)
         await asyncio.to_thread(_enrich_incentive_with_baseline, rule, item_data)
+        await asyncio.to_thread(_enrich_zoning_comparison_with_tad, rule, item_data)
 
     claude_analyses = await asyncio.to_thread(
         analyze_items_with_claude, raw_items, upload.meeting_date, rule_analyses,
@@ -510,7 +515,7 @@ _ADDRESS_RE = re.compile(
 )
 
 
-def _extract_incentive_address(item_data: dict, rule: dict) -> Optional[str]:
+def _extract_parcel_address(item_data: dict, rule: dict) -> Optional[str]:
     """Prefer an address the GIS/comp-plan lookup already resolved; else try the title."""
     addr = rule.get("comp_plan_address")
     if addr:
@@ -530,7 +535,7 @@ def _enrich_incentive_with_baseline(rule: dict, item_data: dict) -> None:
     """
     if not rule.get("economic_incentive_type"):
         return
-    address = _extract_incentive_address(item_data, rule)
+    address = _extract_parcel_address(item_data, rule)
     if not address:
         return
     tad = lookup_by_address(address)
@@ -538,6 +543,27 @@ def _enrich_incentive_with_baseline(rule: dict, item_data: dict) -> None:
         return
     item_text = f"{item_data.get('title', '')} {item_data.get('description', '')}"
     apply_but_for_adjustment(rule, tad["assessed_value"], item_text)
+
+
+def _enrich_zoning_comparison_with_tad(rule: dict, item_data: dict) -> None:
+    """
+    For zoning items with a current-zoning-vs-proposed-use line-item
+    comparison, replace the current-zoning column's estimated revenue with
+    the parcel's real current assessed value from the Tarrant Appraisal
+    District when an address can be resolved. No-ops otherwise, leaving the
+    Fort Worth average-per-acre estimate (clearly labeled as an estimate)
+    in place.
+    """
+    comparison = rule.get("land_use_comparison")
+    if not comparison or comparison.get("mode") != "current_vs_proposed":
+        return
+    address = _extract_parcel_address(item_data, rule)
+    if not address:
+        return
+    tad = lookup_by_address(address)
+    if tad.get("status") != "found" or not tad.get("assessed_value"):
+        return
+    apply_tad_current_value(comparison, tad["assessed_value"])
 
 
 def _infer_category_label(analysis: dict, section: str = "") -> str:

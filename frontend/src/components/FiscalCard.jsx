@@ -431,38 +431,9 @@ export default function FiscalCard({ item }) {
             )}
           </div>
 
-          {/* Supplementary itemized cost/revenue estimate — separate methodology, not used for the rating above */}
-          {analysis.service_cost_breakdown && (
-            <details className="group">
-              <summary className="text-xs font-semibold text-gray-500 cursor-pointer hover:text-gray-700 list-none flex items-center gap-1">
-                <ChevronDown className="w-3 h-3 group-open:rotate-180 transition-transform" />
-                Supplementary itemized cost estimate (police/fire/public works/parks)
-              </summary>
-              <div className="mt-2 space-y-3 bg-gray-50 border border-gray-200 rounded-lg p-3">
-                <p className="text-xs text-gray-500 leading-relaxed">
-                  This is a second, independent estimate built bottom-up from per-resident and
-                  per-lane-mile service costs, shown for comparison — it does <strong>not</strong> drive
-                  the rating above. (For zoning changes, the rating above is often based on the
-                  incremental cost of the change, not a flat per-acre figure — see "Cost used for
-                  official rating" below for the actual number being compared against.)
-                </p>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                  <DetailRow label="Police" value={fmt(analysis.service_cost_breakdown.police_cost)} />
-                  <DetailRow label="Fire/EMS" value={fmt(analysis.service_cost_breakdown.fire_ems_cost)} />
-                  <DetailRow label="Public Works" value={fmt(analysis.service_cost_breakdown.public_works_cost)} />
-                  <DetailRow label="Parks" value={fmt(analysis.service_cost_breakdown.parks_cost)} />
-                </div>
-                <DetailRow label="Admin overhead" value={fmt(analysis.service_cost_breakdown.admin_overhead_cost)} />
-                <DetailRow label="Itemized cost total" value={fmt(analysis.service_cost_breakdown.itemized_cost_total)} bold />
-                <DetailRow label="Cost used for official rating" value={fmt(analysis.service_cost_breakdown.prototype_cost_for_comparison)} />
-                {analysis.service_cost_breakdown.itemized_revenue_total != null && (
-                  <DetailRow label="Itemized revenue estimate" value={fmt(analysis.service_cost_breakdown.itemized_revenue_total)} />
-                )}
-                <p className="text-xs text-gray-600 leading-relaxed pt-1 border-t border-gray-200">
-                  {analysis.service_cost_narrative}
-                </p>
-              </div>
-            </details>
+          {/* Current-zoning-vs-proposed-use line-item fiscal comparison */}
+          {analysis.land_use_comparison && (
+            <LandUseComparison comparison={analysis.land_use_comparison} />
           )}
 
           {/* Description */}
@@ -495,6 +466,121 @@ function Metric({ label, value, highlight }) {
       <div className={`text-sm font-bold ${highlight ? 'text-gray-900' : 'text-gray-700'}`}>{value}</div>
       <div className="text-xs text-gray-500">{label}</div>
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Current-zoning-vs-proposed-use line-item fiscal comparison
+// ---------------------------------------------------------------------------
+function ChangeCell({ value, goodWhenPositive }) {
+  const isZero = !value
+  const isGood = goodWhenPositive ? value > 0 : value < 0
+  const isBad = goodWhenPositive ? value < 0 : value > 0
+  const cls = isZero ? 'text-gray-400' : isGood ? 'text-green-700' : isBad ? 'text-red-600' : 'text-gray-600'
+  return <td className={`py-1 pl-2 font-medium ${cls}`}>{fmt(value)}</td>
+}
+
+function RevenueBadge({ isActual }) {
+  return (
+    <span className={`ml-1 text-[10px] px-1 rounded ${isActual ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-600'}`}>
+      {isActual ? 'actual' : 'est.'}
+    </span>
+  )
+}
+
+function LandUseComparison({ comparison }) {
+  if (comparison.mode === 'proposed_only') {
+    const p = comparison.proposed
+    return (
+      <details className="group">
+        <summary className="text-xs font-semibold text-gray-500 cursor-pointer hover:text-gray-700 list-none flex items-center gap-1">
+          <ChevronDown className="w-3 h-3 group-open:rotate-180 transition-transform" />
+          Fiscal impact by line item — {p.land_use}
+        </summary>
+        <div className="mt-2 space-y-3 bg-gray-50 border border-gray-200 rounded-lg p-3">
+          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+            {comparison.no_comparison_reason}
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+            <DetailRow label="Police" value={fmt(p.police_cost)} />
+            <DetailRow label="Fire/EMS" value={fmt(p.fire_ems_cost)} />
+            <DetailRow label="Public Works" value={fmt(p.public_works_cost)} />
+            <DetailRow label="Parks" value={fmt(p.parks_cost)} />
+          </div>
+          <DetailRow label="Admin overhead" value={fmt(p.admin_overhead_cost)} />
+          <DetailRow label="Total cost" value={fmt(p.total_cost)} bold />
+          <DetailRow label="Revenue estimate" value={fmt(p.revenue_estimate)} />
+          <DetailRow label="Net impact" value={fmt(p.net_impact)} bold />
+          <p className="text-xs text-gray-500 leading-relaxed pt-1 border-t border-gray-200">{p.revenue_basis}</p>
+        </div>
+      </details>
+    )
+  }
+
+  const { current, proposed, change } = comparison
+  const costRows = [
+    ['Police', 'police_cost'],
+    ['Fire/EMS', 'fire_ems_cost'],
+    ['Public Works', 'public_works_cost'],
+    ['Parks', 'parks_cost'],
+    ['Admin overhead', 'admin_overhead_cost'],
+  ]
+
+  return (
+    <details className="group">
+      <summary className="text-xs font-semibold text-gray-500 cursor-pointer hover:text-gray-700 list-none flex items-center gap-1">
+        <ChevronDown className="w-3 h-3 group-open:rotate-180 transition-transform" />
+        Fiscal impact by line item — current zoning vs. proposed use
+      </summary>
+      <div className="mt-2 bg-gray-50 border border-gray-200 rounded-lg p-3 overflow-x-auto">
+        <table className="w-full text-xs whitespace-nowrap">
+          <thead>
+            <tr className="text-left text-gray-500">
+              <th className="py-1 pr-2 font-medium"></th>
+              <th className="py-1 px-2 font-medium">Current: {current.land_use}</th>
+              <th className="py-1 px-2 font-medium">Proposed: {proposed.land_use}</th>
+              <th className="py-1 pl-2 font-medium">Change</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-200">
+            {costRows.map(([label, key]) => (
+              <tr key={key}>
+                <td className="py-1 pr-2 text-gray-500">{label}</td>
+                <td className="py-1 px-2 text-gray-700">{fmt(current[key])}</td>
+                <td className="py-1 px-2 text-gray-700">{fmt(proposed[key])}</td>
+                <ChangeCell value={change[key]} goodWhenPositive={false} />
+              </tr>
+            ))}
+            <tr className="font-semibold">
+              <td className="py-1 pr-2 text-gray-700">Total cost</td>
+              <td className="py-1 px-2 text-gray-900">{fmt(current.total_cost)}</td>
+              <td className="py-1 px-2 text-gray-900">{fmt(proposed.total_cost)}</td>
+              <ChangeCell value={change.total_cost} goodWhenPositive={false} />
+            </tr>
+            <tr>
+              <td className="py-1 pr-2 text-gray-500">Revenue estimate</td>
+              <td className="py-1 px-2 text-gray-700">
+                {fmt(current.revenue_estimate)}<RevenueBadge isActual={current.revenue_is_actual} />
+              </td>
+              <td className="py-1 px-2 text-gray-700">
+                {fmt(proposed.revenue_estimate)}<RevenueBadge isActual={proposed.revenue_is_actual} />
+              </td>
+              <ChangeCell value={change.revenue_estimate} goodWhenPositive={true} />
+            </tr>
+            <tr className="font-semibold">
+              <td className="py-1 pr-2 text-gray-700">Net impact</td>
+              <td className="py-1 px-2 text-gray-900">{fmt(current.net_impact)}</td>
+              <td className="py-1 px-2 text-gray-900">{fmt(proposed.net_impact)}</td>
+              <ChangeCell value={change.net_impact} goodWhenPositive={true} />
+            </tr>
+          </tbody>
+        </table>
+        <div className="mt-3 space-y-1 text-[11px] text-gray-500 leading-relaxed border-t border-gray-200 pt-2">
+          <p><strong>Current:</strong> {current.revenue_basis}</p>
+          <p><strong>Proposed:</strong> {proposed.revenue_basis}</p>
+        </div>
+      </div>
+    </details>
   )
 }
 

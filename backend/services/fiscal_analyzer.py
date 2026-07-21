@@ -987,6 +987,12 @@ def _enrich_zoning_analysis(result: dict, title: str, description: str, acreage:
         if not acreage:
             result["analysis_narrative"] += " Acreage not found in agenda text — estimate assumes 1 acre."
 
+    # Current-zoning-vs-proposed-use line-item comparison, using the same
+    # from/to land-use types as the incremental estimate above.
+    result["land_use_comparison"] = build_land_use_comparison(
+        zr["to_proto"], zr["from_proto"], assumed_acres, not bool(acreage),
+    )
+
     # ── Approval type ────────────────────────────────────────────────────
     approval = detect_approval_type(zr["to_code"], zr["to_desc"])
     result["approval_type"]       = approval["type"]
@@ -1279,30 +1285,20 @@ def analyze_fiscal_impact(item: dict) -> dict:
             log.write_text(traceback.format_exc())
             result["zoning_error"] = str(_exc)
 
-    # Supplementary itemized cost breakdown — computed LAST, after any zoning
-    # incremental override above, so its comparison baseline matches whatever
-    # number actually ended up driving the rating (year1_cost_estimate).
-    # Computing this earlier (inside _land_use_analysis, before the zoning
-    # incremental recalculation) compared against the wrong baseline for any
-    # zoning item with a parsed From/To — the absolute per-acre cost of the
-    # proposed use, not the incremental cost of the change that the rating
-    # actually uses.
-    if category in ("Zoning Change", "Development Agreement"):
+    # Current-zoning-vs-proposed-use line-item comparison. Zoning Change
+    # items with a parsed From/To already got this built inside
+    # _enrich_zoning_analysis (it needs the from/to land-use types, which
+    # only that function has). This is the fallback for everything else
+    # that can still show a proposed-use breakdown: Development Agreement
+    # items (no "current zoning" concept at all), and Zoning Change items
+    # where the from/to designations couldn't be parsed from the text.
+    if category in ("Zoning Change", "Development Agreement") and "land_use_comparison" not in result:
         land_use = result.get("land_use_type")
         if land_use and land_use != "N/A":
             assumed_acres_final = acreage or 1.0
-            breakdown = _compute_service_cost_breakdown(land_use, assumed_acres_final, not bool(acreage))
-            if breakdown:
-                actual_cost = result.get("year1_cost_estimate")
-                if actual_cost is not None:
-                    breakdown["prototype_cost_for_comparison"] = round(actual_cost)
-                    variance = breakdown["itemized_cost_total"] - round(actual_cost)
-                    breakdown["cost_variance_vs_prototype"] = variance
-                    breakdown["cost_variance_vs_prototype_pct"] = (
-                        round((variance / actual_cost) * 100) if actual_cost else None
-                    )
-                result["service_cost_breakdown"] = breakdown
-                result["service_cost_narrative"] = _service_cost_narrative(breakdown)
+            result["land_use_comparison"] = build_land_use_comparison(
+                land_use, None, assumed_acres_final, not bool(acreage),
+            )
 
     return result
 
@@ -1862,24 +1858,23 @@ def _dispatch(
 # ---------------------------------------------------------------------------
 # Land-use analysis (Annexation / Zoning / Development)
 # ---------------------------------------------------------------------------
-def _compute_service_cost_breakdown(land_use: str, assumed_acreage: float, acreage_is_assumed: bool) -> Optional[dict]:
+def _land_use_line_items(land_use: str, assumed_acreage: float) -> Optional[dict]:
     """
-    Supplementary, itemized cost/revenue estimate built bottom-up from
-    Fort Worth's per-capita/per-unit service cost parameters and average
-    assessed values (PARAMETERS), combined with each land-use type's
-    population/lane-mile/parks-acreage density assumptions already present
-    in LAND_USE_PROTOTYPES.
+    Bottom-up, per-service-line cost and revenue estimate for a single
+    land-use type at a given acreage: police, fire/EMS, public works, and
+    parks cost from that type's population/lane-mile/parks-acreage density
+    assumptions (LAND_USE_PROTOTYPES) times Fort Worth's per-capita/
+    per-unit cost parameters (PARAMETERS), plus 15% admin overhead.
 
-    This never sets fiscal_impact_rating itself. Called from
-    analyze_fiscal_impact() at the very end (after any zoning incremental
-    override), with the caller responsible for pointing
-    prototype_cost_for_comparison at whatever figure actually drove the
-    rating — the flat per-acre cost for most items, but the incremental
-    from/to cost for zoning changes with a recognized designation. Getting
-    that comparison baseline wrong (comparing against the flat figure when
-    the rating actually used the incremental one) was a real bug caught
-    after deploy — the two numbers on screen must always be checkable
-    against each other.
+    Revenue is always an ESTIMATE at this stage — residential uses back a
+    unit count out of estimated population and apply average assessed
+    value; everything else uses Fort Worth's calibrated per-acre revenue
+    figure for that land use (which bundles property tax with other
+    revenue sources like sales tax, so it is not directly comparable to a
+    single parcel's property tax bill). Callers building a
+    current-vs-proposed comparison should replace the "current" side's
+    revenue with a real Tarrant Appraisal District assessed value when one
+    can be resolved — see apply_tad_current_value().
     """
     proto = LAND_USE_PROTOTYPES.get(land_use)
     if not proto or proto.get("population_per_acre") is None:
@@ -1895,79 +1890,121 @@ def _compute_service_cost_breakdown(land_use: str, assumed_acreage: float, acrea
     parks_cost        = parks_acres * PARAMETERS["parks_per_acre"]
     direct_cost       = police_cost + fire_ems_cost + public_works_cost + parks_cost
     admin_overhead    = direct_cost * PARAMETERS["admin_overhead_pct"]
-    itemized_cost     = round(direct_cost + admin_overhead)
+    total_cost        = round(direct_cost + admin_overhead)
 
-    # Revenue side is only estimable for residential uses, where a unit
-    # count can be backed out of population ÷ average household size
-    # (2.4, the same assumption already used elsewhere in this file).
-    # Commercial/office/industrial revenue would need a stated square
-    # footage — there's no defensible way to derive that from acreage
-    # alone, so it's left out rather than inventing a floor-area-ratio.
     units_est = None
-    itemized_revenue = None
-    revenue_basis = None
     if "Residential" in land_use and population:
         units_est = round(population / 2.4)
         avg_value = PARAMETERS["avg_mf_unit_value"] if "Multifamily" in land_use else PARAMETERS["avg_sfr_value"]
-        itemized_revenue = round(units_est * avg_value * PARAMETERS["property_tax_rate"])
+        revenue = round(units_est * avg_value * PARAMETERS["property_tax_rate"])
         revenue_basis = (
-            f"{units_est} estimated units x ${avg_value:,.0f} average assessed value x "
-            f"{PARAMETERS['property_tax_rate'] * 100:.4f}% city tax rate"
+            f"Estimated: {units_est} units (from population ÷ 2.4) x ${avg_value:,.0f} average assessed "
+            f"value x {PARAMETERS['property_tax_rate'] * 100:.4f}% city property tax rate"
+        )
+    else:
+        revenue = round((proto.get("revenue_per_acre_yr1") or 0) * assumed_acreage)
+        revenue_basis = (
+            f"Estimated: Fort Worth's average revenue per acre for {land_use} "
+            f"(${proto.get('revenue_per_acre_yr1') or 0:,.0f}/acre) — this bundles property tax with other "
+            f"revenue sources for this land use (e.g. sales tax), it is not property tax alone"
         )
 
-    prototype_cost = round((proto.get("cost_per_acre_yr1") or 0) * assumed_acreage)
-    cost_variance = itemized_cost - prototype_cost
-    cost_variance_pct = round((cost_variance / prototype_cost) * 100) if prototype_cost else None
-
     return {
-        "population_estimate":              population,
-        "lane_miles_estimate":               lane_miles,
-        "parks_acres_estimate":              parks_acres,
-        "police_cost":                       round(police_cost),
-        "fire_ems_cost":                     round(fire_ems_cost),
-        "public_works_cost":                 round(public_works_cost),
-        "parks_cost":                        round(parks_cost),
-        "admin_overhead_cost":               round(admin_overhead),
-        "itemized_cost_total":               itemized_cost,
-        "prototype_cost_for_comparison":     prototype_cost,
-        "cost_variance_vs_prototype":        cost_variance,
-        "cost_variance_vs_prototype_pct":    cost_variance_pct,
-        "units_estimate":                    units_est,
-        "itemized_revenue_total":            itemized_revenue,
-        "itemized_revenue_basis":            revenue_basis,
-        "acreage_is_assumed":                acreage_is_assumed,
+        "land_use":             land_use,
+        "population_estimate":  population,
+        "lane_miles_estimate":  lane_miles,
+        "parks_acres_estimate": parks_acres,
+        "police_cost":          round(police_cost),
+        "fire_ems_cost":        round(fire_ems_cost),
+        "public_works_cost":    round(public_works_cost),
+        "parks_cost":           round(parks_cost),
+        "admin_overhead_cost":  round(admin_overhead),
+        "total_cost":           total_cost,
+        "units_estimate":       units_est,
+        "revenue_estimate":     revenue,
+        "revenue_basis":        revenue_basis,
+        "revenue_is_actual":    False,
+        "net_impact":           revenue - total_cost,
     }
 
 
-def _service_cost_narrative(b: dict) -> str:
-    parts = [
-        f"Supplementary itemized estimate: at this density, approximately {b['population_estimate']:,.1f} "
-        f"residents, {b['lane_miles_estimate']:.2f} lane-miles, and {b['parks_acres_estimate']:.2f} acres "
-        f"of parkland demand — costing an estimated ${b['police_cost']:,.0f} (police) + "
-        f"${b['fire_ems_cost']:,.0f} (fire/EMS) + ${b['public_works_cost']:,.0f} (public works) + "
-        f"${b['parks_cost']:,.0f} (parks), plus ${b['admin_overhead_cost']:,.0f} administrative "
-        f"overhead — ${b['itemized_cost_total']:,.0f}/year total."
+def _line_item_change(current: dict, proposed: dict) -> dict:
+    keys = [
+        "police_cost", "fire_ems_cost", "public_works_cost", "parks_cost",
+        "admin_overhead_cost", "total_cost", "revenue_estimate", "net_impact",
     ]
-    if b["prototype_cost_for_comparison"]:
-        direction = "higher" if b["cost_variance_vs_prototype"] > 0 else "lower"
-        parts.append(
-            f" That is ${abs(b['cost_variance_vs_prototype']):,.0f}/year "
-            f"({abs(b['cost_variance_vs_prototype_pct'] or 0)}%) {direction} than the "
-            f"${b['prototype_cost_for_comparison']:,.0f}/year cost figure used for the official rating above "
-            f"(for zoning changes with a recognized from/to, that figure is the incremental cost of the "
-            f"change, not the flat per-acre cost of the new use alone)."
+    return {k: proposed[k] - current[k] for k in keys}
+
+
+def build_land_use_comparison(
+    to_land_use: str,
+    from_land_use: Optional[str],
+    assumed_acreage: float,
+    acreage_is_assumed: bool,
+) -> Optional[dict]:
+    """
+    Builds the current-zoning-vs-proposed-use line-item cost/revenue
+    comparison shown on each applicable item. Falls back to a
+    proposed-use-only breakdown (with an explanatory note) when there's no
+    current land use to compare against — e.g. a Development Agreement
+    item, or a Zoning Change whose current/proposed designations couldn't
+    be parsed from the agenda text.
+    """
+    proposed = _land_use_line_items(to_land_use, assumed_acreage)
+    if not proposed:
+        return None
+    proposed["acreage"] = assumed_acreage
+    proposed["acreage_is_assumed"] = acreage_is_assumed
+
+    current = None
+    if from_land_use and from_land_use != "Unknown / Not Applicable":
+        current = _land_use_line_items(from_land_use, assumed_acreage)
+
+    if not current:
+        reason = (
+            "The current zoning's land-use type could not be determined from the agenda text, "
+            "so there's no current-use figure to compare against — only the proposed use is shown."
+            if not from_land_use or from_land_use == "Unknown / Not Applicable" else
+            f"\"{from_land_use}\" doesn't have per-acre service-cost assumptions defined, so there's "
+            "no current-use figure to compare against — only the proposed use is shown."
         )
-    if b["itemized_revenue_total"] is not None:
-        parts.append(
-            f" Revenue side: {b['itemized_revenue_basis']} -> an estimated "
-            f"${b['itemized_revenue_total']:,.0f}/year in property tax."
-        )
-    else:
-        parts.append(
-            " Revenue side of this itemized estimate isn't available for this land-use type without "
-            "a stated unit count or square footage in the agenda text."
-        )
-    return "".join(parts)
+        return {"mode": "proposed_only", "proposed": proposed, "no_comparison_reason": reason}
+
+    current["acreage"] = assumed_acreage
+    current["acreage_is_assumed"] = acreage_is_assumed
+
+    return {
+        "mode": "current_vs_proposed",
+        "current": current,
+        "proposed": proposed,
+        "change": _line_item_change(current, proposed),
+    }
+
+
+def apply_tad_current_value(comparison: Optional[dict], tad_assessed_value: Optional[int]) -> Optional[dict]:
+    """
+    Replace the "current zoning" column's estimated revenue with the
+    parcel's real current assessed value from the Tarrant Appraisal
+    District, and recompute net impact and the change column to match.
+    No-op if there's no current-vs-proposed comparison to patch, or no
+    real assessed value was found — the Fort Worth average-per-acre
+    estimate (clearly labeled as an estimate) stays in place in that case.
+    """
+    if not comparison or comparison.get("mode") != "current_vs_proposed" or not tad_assessed_value:
+        return comparison
+
+    current = comparison["current"]
+    new_revenue = round(tad_assessed_value * PARAMETERS["property_tax_rate"])
+    current["revenue_estimate"] = new_revenue
+    current["revenue_basis"] = (
+        f"Actual: current assessed value from Tarrant Appraisal District (${tad_assessed_value:,.0f}) "
+        f"x {PARAMETERS['property_tax_rate'] * 100:.4f}% city property tax rate"
+    )
+    current["revenue_is_actual"] = True
+    current["net_impact"] = new_revenue - current["total_cost"]
+
+    comparison["change"] = _line_item_change(current, comparison["proposed"])
+    return comparison
 
 
 def _land_use_analysis(
