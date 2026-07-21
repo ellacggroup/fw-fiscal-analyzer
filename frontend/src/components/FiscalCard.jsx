@@ -492,12 +492,11 @@ function LandUseComparison({ comparison }) {
   if (comparison.mode === 'proposed_only') {
     const p = comparison.proposed
     return (
-      <details className="group">
-        <summary className="text-xs font-semibold text-gray-500 cursor-pointer hover:text-gray-700 list-none flex items-center gap-1">
-          <ChevronDown className="w-3 h-3 group-open:rotate-180 transition-transform" />
+      <div>
+        <h4 className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">
           Fiscal impact by line item — {p.land_use}
-        </summary>
-        <div className="mt-2 space-y-3 bg-gray-50 border border-gray-200 rounded-lg p-3">
+        </h4>
+        <div className="space-y-3 bg-gray-50 border border-gray-200 rounded-lg p-3">
           <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
             {comparison.no_comparison_reason}
           </p>
@@ -513,7 +512,7 @@ function LandUseComparison({ comparison }) {
           <DetailRow label="Net impact" value={fmt(p.net_impact)} bold />
           <p className="text-xs text-gray-500 leading-relaxed pt-1 border-t border-gray-200">{p.revenue_basis}</p>
         </div>
-      </details>
+      </div>
     )
   }
 
@@ -527,12 +526,11 @@ function LandUseComparison({ comparison }) {
   ]
 
   return (
-    <details className="group">
-      <summary className="text-xs font-semibold text-gray-500 cursor-pointer hover:text-gray-700 list-none flex items-center gap-1">
-        <ChevronDown className="w-3 h-3 group-open:rotate-180 transition-transform" />
+    <div>
+      <h4 className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">
         Fiscal impact by line item — current zoning vs. proposed use
-      </summary>
-      <div className="mt-2 bg-gray-50 border border-gray-200 rounded-lg p-3 overflow-x-auto">
+      </h4>
+      <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 overflow-x-auto">
         <table className="w-full text-xs whitespace-nowrap">
           <thead>
             <tr className="text-left text-gray-500">
@@ -580,7 +578,7 @@ function LandUseComparison({ comparison }) {
           <p><strong>Proposed:</strong> {proposed.revenue_basis}</p>
         </div>
       </div>
-    </details>
+    </div>
   )
 }
 
