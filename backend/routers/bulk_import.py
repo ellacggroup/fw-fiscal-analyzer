@@ -293,6 +293,8 @@ def _normalize_date_to_iso(date_str: str) -> Optional[str]:
     """Convert any stored date format to ISO YYYY-MM-DD."""
     if not date_str:
         return None
+    # Dates pulled out of PDFs can carry line breaks ("June\n17, 2025").
+    date_str = re.sub(r'\s+', ' ', date_str).strip()
     # Already ISO
     if re.match(r'^\d{4}-\d{2}-\d{2}$', date_str):
         return date_str
@@ -308,6 +310,44 @@ def _normalize_date_to_iso(date_str: str) -> Optional[str]:
             return dt.strftime("%Y-%m-%d")
         except ValueError:
             pass
+    return None
+
+
+def _find_upload_by_date(db: Session, date: str, document_type: str):
+    """Find an existing upload for a meeting date, tolerating date formats.
+
+    Callers pass the scraper's ISO date ("2026-06-09"), but meeting_date is
+    stored however the PDF spelled it ("June 9, 2026"), because it comes from
+    detect_meeting_date(). A plain equality filter therefore never matches an
+    already-imported meeting — which silently re-imported every agenda on each
+    run, and left minutes unable to find their agenda to attach votes to.
+    """
+    if not date or date == "unknown":
+        return None
+
+    exact = (
+        db.query(AgendaUpload)
+        .filter(
+            AgendaUpload.meeting_date == date,
+            AgendaUpload.document_type == document_type,
+        )
+        .first()
+    )
+    if exact:
+        return exact
+
+    iso = _normalize_date_to_iso(date)
+    if not iso:
+        return None
+
+    candidates = (
+        db.query(AgendaUpload)
+        .filter(AgendaUpload.document_type == document_type)
+        .all()
+    )
+    for upload in candidates:
+        if _normalize_date_to_iso(upload.meeting_date or "") == iso:
+            return upload
     return None
 
 
@@ -431,14 +471,7 @@ def _process_youtube_votes(
             return 0
 
         if not upload_id:
-            upload = (
-                db.query(AgendaUpload)
-                .filter(
-                    AgendaUpload.meeting_date == date,
-                    AgendaUpload.document_type == "agenda",
-                )
-                .first()
-            )
+            upload = _find_upload_by_date(db, date, "agenda")
             if not upload:
                 return 0
             upload_id = upload.id
@@ -474,14 +507,7 @@ def _process_agenda_url(
     """
     # Skip if we already have an agenda for this meeting date
     if date and date != "unknown":
-        existing = (
-            db.query(AgendaUpload)
-            .filter(
-                AgendaUpload.meeting_date == date,
-                AgendaUpload.document_type == "agenda",
-            )
-            .first()
-        )
+        existing = _find_upload_by_date(db, date, "agenda")
         if existing:
             _append_log(db, job, f"  Skipping {date} agenda (already imported)")
             job.skipped = (job.skipped or 0) + 1
